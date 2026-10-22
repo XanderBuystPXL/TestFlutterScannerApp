@@ -28,6 +28,33 @@ final class RunnerTests: XCTestCase {
     }
   }
 
+  private func captureFixture(_ id: String, train: Int = 20, validation: Int = 10) throws -> [String: Any] {
+    let root = try store.directory(id)
+    for name in ["rgb", "depth", "confidence", "roomplan"] {
+      try FileManager.default.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
+    }
+    try roomData.write(to: root.appendingPathComponent("room.json"))
+    try roomData.write(to: root.appendingPathComponent("roomplan/live-room.json"))
+    try Data("synthetic USDZ storage fixture".utf8).write(to: root.appendingPathComponent("roomplan/room.usdz"))
+    try Data("{}".utf8).write(to: root.appendingPathComponent("roomplan/node-map.json"))
+    var indexData = Data()
+    for index in 1...(train + validation) {
+      let name = String(format: "frame-%06d", index)
+      let rgb = "rgb/\(name).jpg", depth = "depth/\(name).f32", confidence = "confidence/\(name).u8"
+      // File-layout fixtures, not real sensor values or JPEG/USDZ content.
+      try Data("synthetic JPEG".utf8).write(to: root.appendingPathComponent(rgb))
+      try Data(count: 16).write(to: root.appendingPathComponent(depth))
+      try Data(count: 4).write(to: root.appendingPathComponent(confidence))
+      let frame: [String: Any] = ["frame_id": name, "role": index <= train ? "train" : "validation", "rgb_path": rgb,
+        "depth": ["path": depth, "width": 2, "height": 2], "confidence": ["path": confidence]]
+      indexData.append(try JSONSerialization.data(withJSONObject: frame))
+      indexData.append(10)
+    }
+    try indexData.write(to: root.appendingPathComponent("frames.jsonl"))
+    return ["train_frames": train, "validation_frames": validation, "saved_frames": train + validation,
+            "training_camera_span_metres": 0.5]
+  }
+
   func testCompletedScanSurvivesNewStoreInstance() throws {
     let id = try begin()
     try complete(id)
@@ -201,13 +228,7 @@ final class RunnerTests: XCTestCase {
   func testPackageCommitRequiresArchiveAndRestoresZIPSharing() throws {
     let id = try begin()
     let root = try store.directory(id)
-    try FileManager.default.createDirectory(at: root.appendingPathComponent("roomplan"), withIntermediateDirectories: true)
-    try roomData.write(to: root.appendingPathComponent("room.json"))
-    try roomData.write(to: root.appendingPathComponent("roomplan/live-room.json"))
-    try Data("synthetic frame log; not a capture".utf8).write(to: root.appendingPathComponent("frames.jsonl"))
-    try Data("synthetic USDZ storage fixture".utf8).write(to: root.appendingPathComponent("roomplan/room.usdz"))
-    try Data("{}".utf8).write(to: root.appendingPathComponent("roomplan/node-map.json"))
-    let report: [String: Any] = ["train_frames": 20, "validation_frames": 10, "training_camera_span_metres": 0.5]
+    let report = try captureFixture(id)
     let archive = try CaptureFormat.finalise(root: root, scanID: id, device: ["testFixture": true], counts: counts, report: report)
     XCTAssertTrue(FileManager.default.fileExists(atPath: archive.path))
     let reopened = try ScanStore(baseURL: folder)
@@ -218,5 +239,94 @@ final class RunnerTests: XCTestCase {
     XCTAssertNotNil(files["room.json"])
     XCTAssertNil(files[archive.lastPathComponent])
     XCTAssertNil(files["checksums.json"])
+  }
+
+  func testRelativePayloadPathResolvesAliasAndDirectoryHints() throws {
+    let id = try begin()
+    _ = try captureFixture(id, train: 32, validation: 77)
+    let root = try store.directory(id)
+    let alias = folder.appendingPathComponent("short-alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+    let depth = root.appendingPathComponent("depth/frame-000075.f32")
+    XCTAssertEqual(try CaptureFormat.relativePayloadPath(depth, under: alias), "depth/frame-000075.f32")
+    let trailing = URL(fileURLWithPath: root.path + "/", isDirectory: true)
+    XCTAssertEqual(try CaptureFormat.relativePayloadPath(depth, under: trailing), "depth/frame-000075.f32")
+    let files = try CaptureFormat.payloadFiles(alias)
+    XCTAssertEqual(files.first(where: { $0.0 == "depth/frame-000075.f32" })?.1,
+                   depth.resolvingSymlinksInPath().standardizedFileURL)
+    for (relative, source) in files {
+      XCTAssertEqual(try Data(contentsOf: source), try Data(contentsOf: alias.appendingPathComponent(relative)))
+    }
+    XCTAssertThrowsError(try CaptureFormat.relativePayloadPath(folder.appendingPathComponent("outside.txt"), under: root))
+  }
+
+  func test109FrameCapturePackagesThroughAliasedRoot() throws {
+    let id = try begin()
+    let report = try captureFixture(id, train: 32, validation: 77)
+    let root = try store.directory(id)
+    let alias = folder.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+    _ = try CaptureFormat.finalise(root: alias, scanID: id, device: ["testFixture": true], counts: counts, report: report)
+    XCTAssertEqual(try store.latestCompleted()?["scanId"] as? String, id)
+    let manifest = try CaptureFormat.readJSON(root.appendingPathComponent("checksums.json"))
+    let files = manifest["files"] as! [String: Any]
+    XCTAssertNotNil(files["depth/frame-000075.f32"])
+  }
+
+  func testActuallyMissingDepthFileIsReportedBeforeCompletion() throws {
+    let id = try begin()
+    let report = try captureFixture(id, train: 32, validation: 77)
+    let root = try store.directory(id)
+    try FileManager.default.removeItem(at: root.appendingPathComponent("depth/frame-000075.f32"))
+    XCTAssertThrowsError(try CaptureFormat.finalise(root: root, scanID: id, device: [:], counts: counts, report: report)) { error in
+      XCTAssertEqual((error as NSError).userInfo["relativePath"] as? String, "depth/frame-000075.f32")
+      XCTAssertEqual((error as NSError).userInfo["stage"] as? String, "frame validation")
+    }
+    XCTAssertNil(try store.latestCompleted())
+    let diag = try CaptureFormat.readJSON(store.diagnosticsURL(id))
+    XCTAssertEqual(diag["state"] as? String, "packaging")
+    XCTAssertNil(diag["completedAt"])
+    let failure = CaptureFormat.fileError(CaptureFormat.error("missing"), stage: "frame validation", path: "depth/frame-000075.f32")
+    try store.record(id, event: "attempt_failed", state: "failed", error: failure, errorCode: "file_write_failed")
+    let savedError = try CaptureFormat.readJSON(store.diagnosticsURL(id))["error"] as? [String: Any]
+    XCTAssertEqual(savedError?["relativePath"] as? String, "depth/frame-000075.f32")
+    XCTAssertEqual(savedError?["stage"] as? String, "frame validation")
+  }
+
+  func testTruncatedDepthFileIsRejected() throws {
+    let id = try begin()
+    let report = try captureFixture(id)
+    let root = try store.directory(id)
+    try Data(count: 8).write(to: root.appendingPathComponent("depth/frame-000001.f32"))
+    XCTAssertThrowsError(try CaptureFormat.finalise(root: root, scanID: id, device: [:], counts: counts, report: report)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("16 bytes"))
+    }
+    XCTAssertNil(try store.latestCompleted())
+  }
+
+  func testFailedCaptureCanBeRepackagedWithoutScanningAgain() throws {
+    let id = try begin()
+    let report = try captureFixture(id)
+    let root = try store.directory(id)
+    var diag = try CaptureFormat.readJSON(store.diagnosticsURL(id))
+    diag["capture"] = report; diag["counts"] = counts; diag["completedAt"] = "stale"
+    try CaptureFormat.writeJSON(diag, to: store.diagnosticsURL(id))
+    try store.record(id, event: "attempt_failed", state: "failed", error: CaptureFormat.error("Previous packaging failed."))
+    XCTAssertEqual(try store.retryCandidate()?["scanId"] as? String, id)
+    XCTAssertNil(try CaptureFormat.readJSON(store.diagnosticsURL(id))["completedAt"])
+    try store.record(id, event: "export_retry_requested", state: "packaging")
+    _ = try CaptureFormat.finalise(root: root, scanID: id, device: [:], counts: counts, report: report)
+    XCTAssertEqual(try store.latestCompleted()?["scanId"] as? String, id)
+    XCTAssertNil(try CaptureFormat.readJSON(store.diagnosticsURL(id))["error"])
+    XCTAssertNil(try store.retryCandidate())
+  }
+
+  func testPayloadSymlinkOutsideScanIsRejected() throws {
+    let id = try begin()
+    let root = try store.directory(id)
+    let outside = folder.appendingPathComponent("outside.txt")
+    try Data("private".utf8).write(to: outside)
+    try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape.txt"), withDestinationURL: outside)
+    XCTAssertThrowsError(try CaptureFormat.payloadFiles(root))
   }
 }

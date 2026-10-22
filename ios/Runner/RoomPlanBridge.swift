@@ -35,6 +35,7 @@ final class RoomPlanBridge {
       switch call.method {
       case "getStatus": result(self.status())
       case "startScan": self.startScan(result)
+      case "retryLatestExport": self.retryLatestExport(result)
       case "shareLatestResult": self.share(diagnosticsOnly: false, result: result)
       case "shareDiagnostics": self.share(diagnosticsOnly: true, result: result)
       case "deleteAllScans":
@@ -83,11 +84,12 @@ final class RoomPlanBridge {
   private func status() -> [String: Any] {
     let device = deviceInfo()
     var value: [String: Any] = ["supported": supported, "supportMessage": supportMessage,
-                                "cameraPermission": permission, "hasDiagnostics": false,
+                                "cameraPermission": permission, "hasDiagnostics": false, "canRetryExport": false,
                                 "buildLabel": "\(device["appVersion"] ?? "unknown") (\(device["appBuild"] ?? "unknown"))"]
     do {
       let store = try requireStore()
       if let scan = try store.latestCompleted() { value["latestScan"] = scan }
+      value["canRetryExport"] = try store.retryCandidate() != nil
       if let attempt = try store.latestAttempt() {
         value["hasDiagnostics"] = true
         value["latestAttemptState"] = attempt["state"]
@@ -152,6 +154,34 @@ final class RoomPlanBridge {
     @unknown default:
       fail("permission_denied", "Camera permission could not be determined.")
     }
+  }
+
+  private func retryLatestExport(_ result: @escaping FlutterResult) {
+    guard pendingResult == nil, presenter?.presentedViewController == nil else {
+      result(FlutterError(code: "busy", message: "Close the current screen before retrying export.", details: nil)); return
+    }
+    do {
+      let store = try requireStore()
+      guard let attempt = try store.retryCandidate(), let id = attempt["scanId"] as? String,
+            let report = attempt["capture"] as? [String: Any], let counts = attempt["counts"] as? [String: Int],
+            let device = attempt["device"] as? [String: Any] else {
+        throw CaptureFormat.error("No saved capture is available to repackage. Start a new scan.")
+      }
+      let root = try store.directory(id)
+      activeID = id; pendingResult = result
+      guard record("export_retry_requested", state: "packaging", details: ["packager": deviceInfo()]) else { return }
+      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        do {
+          _ = try CaptureFormat.finalise(root: root, scanID: id, device: device, counts: counts, report: report)
+          guard let summary = try store.latestCompleted(), summary["scanId"] as? String == id else {
+            throw CaptureFormat.error("The retried package could not be reopened.")
+          }
+          DispatchQueue.main.async { self?.resolve(["status": "completed", "scan": summary]) }
+        } catch {
+          DispatchQueue.main.async { self?.fail("file_write_failed", "The saved capture could not be packaged: \(error.localizedDescription)", error) }
+        }
+      }
+    } catch { result(FlutterError(code: "file_write_failed", message: error.localizedDescription, details: nil)) }
   }
 
   @discardableResult

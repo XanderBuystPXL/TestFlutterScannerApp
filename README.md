@@ -1,6 +1,6 @@
 # RoomPlan capture pipeline test
 
-Standalone Flutter/Swift app for **cloud build → Windows install → LiDAR capture → checked reconstruction dataset**. Source version **0.2.0 (3)**. The Aproxx team app is untouched.
+Standalone Flutter/Swift app for **cloud build → Windows install → LiDAR capture → checked reconstruction dataset**. Source version **0.2.1 (4)**. The Aproxx team app is untouched.
 
 Captures one room using public Apple APIs: RGB photos, per-frame camera poses/intrinsics, synchronized scene depth/confidence, complete RoomPlan JSON, USDZ, node metadata, live geometry for alignment, events and checksums. Shares one ZIP. Desktop tools validate it and prepare inputs for the existing Gaussian-splat research pipeline.
 
@@ -12,7 +12,13 @@ Captures one room using public Apple APIs: RGB photos, per-frame camera poses/in
 2. Start a build. No signing credentials or App Store Connect account are needed for the unsigned workflow. Download the new `RoomPlanTest-unsigned.ipa` after all checks pass.
 3. On the Windows PC connected to the phone, install [Sideloadly](https://sideloadly.io/), follow its current Apple device-component setup, and connect the unlocked iPhone by USB. Accept Trust this computer.
 4. Select the IPA in Sideloadly, sign with your Apple account, complete verification and install. Trust the developer profile and enable Developer Mode when prompted. The device owner must approve phone security prompts; this does not bypass Face ID/passcode restrictions.
-5. Confirm **App version: 0.2.0 (3)**. For updates, use the same signing account/bundle identifier and install over the app to retain captures. Free provisioning normally needs refreshing after seven days; see [Sideloadly's FAQ](https://sideloadly.io/faq).
+5. Confirm **App version: 0.2.1 (4)**. For updates, use the same signing account/bundle identifier and install over the app to retain captures. Free provisioning normally needs refreshing after seven days; see [Sideloadly's FAQ](https://sideloadly.io/faq).
+
+### Recover the failed 0.2.0 capture
+
+Version 0.2.1 fixes fragile file-path slicing in packaging: filesystem aliases and directory URL spellings are handled by resolving paths and comparing components. Checksums/read-back retain actual file URLs. Every indexed RGB/depth/confidence asset and its expected size is checked before packaging; a genuinely missing file is reported with its relative path and stage.
+
+Install **over** the old app without uninstalling, using the same signing account/bundle ID. If the last failed attempt still has its capture metadata and room exports, tap **Retry saving last scan**. This uses existing files without starting the camera. It cannot recreate a genuinely deleted depth map; such a failure remains explicit and requires a new scan. Earlier completed scans stay intact. Retry diagnostics record the packager build while preserving the original capture device/build metadata.
 
 The IPA currently tracked in `artifacts/` is **0.1.0 (1)**. It does not contain this work. Teammates may replace it with the new verified artifact; keep the version clear in `artifacts/README.md`. Never commit captures or signing credentials.
 
@@ -84,6 +90,7 @@ Contract: [CAPTURE-FORMAT.md](docs/CAPTURE-FORMAT.md). Channel: `be.aproxx.roomp
 | --- | --- |
 | `getStatus` | Support, permission, latest result, capture counts, `pipelineReady`, diagnostics |
 | `startScan` | Completes after geometry/package commit, or returns cancellation/native error |
+| `retryLatestExport` | Revalidates/repackages the latest failed or interrupted capture from existing files |
 | `shareLatestResult` | One ZIP for new captures; two JSON files for legacy results |
 | `shareDiagnostics` | Latest attempt's JSON log |
 | `deleteAllScans` | Removes UUID attempt directories; blocked during capture/packaging |

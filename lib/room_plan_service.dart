@@ -35,6 +35,7 @@ class RoomPlanStatus {
     this.latestAttemptState,
     this.storageWarning,
     this.buildLabel,
+    this.canRetryExport = false,
   });
 
   factory RoomPlanStatus.fromMap(Map<String, dynamic> map) => RoomPlanStatus(
@@ -50,6 +51,7 @@ class RoomPlanStatus {
     latestAttemptState: map['latestAttemptState'] as String?,
     storageWarning: map['storageWarning'] as String?,
     buildLabel: map['buildLabel'] as String?,
+    canRetryExport: map['canRetryExport'] as bool? ?? false,
   );
 
   final bool supported;
@@ -60,6 +62,7 @@ class RoomPlanStatus {
   final String? latestAttemptState;
   final String? storageWarning;
   final String? buildLabel;
+  final bool canRetryExport;
 }
 
 class RoomPlanService {
@@ -107,4 +110,16 @@ class RoomPlanService {
       channel.invokeMethod<void>('shareDiagnostics');
 
   Future<void> deleteAllScans() => channel.invokeMethod<void>('deleteAllScans');
+
+  Future<bool> retryLatestExport() async {
+    final map = await channel.invokeMapMethod<String, dynamic>(
+      'retryLatestExport',
+    );
+    if (map?['status'] != 'completed') {
+      throw const FormatException(
+        'The scanner returned an unknown export result.',
+      );
+    }
+    return true;
+  }
 }

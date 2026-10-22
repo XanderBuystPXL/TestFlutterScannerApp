@@ -58,3 +58,9 @@ The explicit check-pass RGB/depth never enters fitting/initialization through th
 Diagnostics contain build/device versions, support/permission, state, UTC events, errors, result counts and drop counts. Application code records no account credentials, GPS, device name, serial or advertising identifier. Hardware identifier describes a model class. Interior geometry and images remain sensitive.
 
 Hashes prove byte integrity, not sender identity or physical accuracy. Dataset checksums bind converted files/provenance. Upload authentication, resumable delivery, tenant/project association and multiroom capture are separate integration work.
+
+## Export retry and file paths (0.2.1)
+
+Payload paths are derived from resolved URL components, with containment checks and child-symlink rejection. File URLs returned by enumeration are retained for checksums/read-back rather than reconstructed from string offsets. This handles different spellings of a sandbox root and trailing directory separators. Frame index references and RGB/depth/confidence sizes are checked before completion metadata is generated. Errors identify the stage and relative asset path without requiring a full sandbox path in diagnostics.
+
+`retryLatestExport` reuses the latest failed/interrupted attempt if its capture report and room exports remain present. It validates every recorded frame before rebuilding the ZIP. Original capture IDs/device/build stay intact; the retry event records the current packager build. A failed attempt has no completion timestamp; old errors are cleared only when a retry starts, and a failed retry records a new error. Retry never fills in missing depth or silently omits frames.

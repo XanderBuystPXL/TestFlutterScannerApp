@@ -51,9 +51,35 @@ enum CaptureFormat {
     return ["bytes": size, "sha256": hash.finalize().map { String(format: "%02x", $0) }.joined()]
   }
 
+  static func relativePayloadPath(_ file: URL, under root: URL) throws -> String {
+    // iOS can expose /var and /private/var aliases for the same sandbox. Never
+    // subtract character counts from paths supplied by different URL APIs.
+    let base = root.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+    let parts = file.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+    guard parts.count > base.count, Array(parts.prefix(base.count)) == base else {
+      throw error("A payload file resolved outside its scan directory.")
+    }
+    let relative = parts.dropFirst(base.count)
+    guard relative.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+      throw error("Invalid scan payload path.")
+    }
+    return relative.joined(separator: "/")
+  }
+
+  static func fileError(_ underlying: Error, stage: String, path: String) -> NSError {
+    let native = underlying as NSError
+    return NSError(domain: "RoomPlanDeviceTest.Package", code: 2, userInfo: [
+      NSLocalizedDescriptionKey: "\(stage) failed for \(path): \(native.localizedDescription)",
+      NSUnderlyingErrorKey: native, "stage": stage, "relativePath": path
+    ])
+  }
+
   static func payloadFiles(_ root: URL) throws -> [(String, URL)] {
-    guard let iterator = FileManager.default.enumerator(at: root,
-      includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]) else {
+    let canonicalRoot = root.resolvingSymlinksInPath().standardizedFileURL
+    var enumerationError: Error?
+    guard let iterator = FileManager.default.enumerator(at: canonicalRoot,
+      includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles],
+      errorHandler: { _, error in enumerationError = error; return false }) else {
       throw error("Could not enumerate the scan package.")
     }
     var files: [(String, URL)] = []
@@ -61,11 +87,57 @@ enum CaptureFormat {
       let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
       guard values.isSymbolicLink != true else { throw error("Scan packages must not contain symbolic links.") }
       guard values.isRegularFile == true else { continue }
-      let path = String(url.path.dropFirst(root.path.count + 1))
+      let path = try relativePayloadPath(url, under: canonicalRoot)
       if path.hasSuffix(".zip") || path.hasSuffix(".tmp") { continue }
-      files.append((path, url))
+      files.append((path, url.resolvingSymlinksInPath().standardizedFileURL))
     }
+    if let failure = enumerationError { throw fileError(failure, stage: "enumeration", path: ".") }
     return files.sorted { $0.0 < $1.0 }
+  }
+
+  static func validateFrameFiles(root: URL, report: [String: Any], files: [(String, URL)]) throws {
+    let inventory = Dictionary(uniqueKeysWithValues: files)
+    let data = try Data(contentsOf: root.appendingPathComponent("frames.jsonl"))
+    var assets = Set<String>()
+    var train = 0, validation = 0
+    for line in data.split(separator: 10) where !line.isEmpty {
+      guard let frame = try JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+            let id = frame["frame_id"] as? String,
+            id.range(of: "^frame-[0-9]{6}$", options: .regularExpression) != nil,
+            let role = frame["role"] as? String, ["train", "validation"].contains(role),
+            let rgb = frame["rgb_path"] as? String,
+            let depth = frame["depth"] as? [String: Any], let depthPath = depth["path"] as? String,
+            let confidence = frame["confidence"] as? [String: Any], let confidencePath = confidence["path"] as? String,
+            let width = depth["width"] as? Int, let height = depth["height"] as? Int,
+            width > 0, height > 0, width <= Int.max / height / 4 else {
+        throw error("The saved frame index is incomplete or malformed.")
+      }
+      let expected = ["rgb/\(id).jpg", "depth/\(id).f32", "confidence/\(id).u8"]
+      guard [rgb, depthPath, confidencePath] == expected else { throw error("Unexpected asset paths in \(id).") }
+      for (index, path) in expected.enumerated() {
+        guard assets.insert(path).inserted else { throw error("Duplicate frame asset: \(path)") }
+        guard let source = inventory[path] else {
+          throw fileError(error("The recorded asset is missing from the capture."), stage: "frame validation", path: path)
+        }
+        do {
+          let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
+          let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+          let expectedSize = index == 1 ? width * height * 4 : width * height
+          let sizeIsValid = index == 0 ? size > 0 : size == expectedSize
+          guard sizeIsValid else {
+            let description = index == 0 ? "nonempty JPEG" : "\(expectedSize) bytes"
+            throw error("Expected \(description), found \(size) bytes.")
+          }
+        } catch { throw fileError(error, stage: "frame validation", path: path) }
+      }
+      if role == "train" { train += 1 } else { validation += 1 }
+    }
+    guard let expectedTrain = report["train_frames"] as? Int,
+          let expectedValidation = report["validation_frames"] as? Int,
+          let expectedTotal = report["saved_frames"] as? Int,
+          train == expectedTrain, validation == expectedValidation, train + validation == expectedTotal else {
+      throw error("Recorded frame counts do not match the saved frame index.")
+    }
   }
 
   static func validateCaptureReport(_ report: [String: Any]) throws {
@@ -86,11 +158,14 @@ enum CaptureFormat {
     let diagnosticsURL = root.appendingPathComponent("diagnostics.json")
     var diagnostics = try readJSON(diagnosticsURL)
     diagnostics["state"] = "packaging"
+    diagnostics.removeValue(forKey: "error")
+    diagnostics.removeValue(forKey: "completedAt")
     diagnostics["counts"] = counts
     diagnostics["capture"] = report
     try writeJSON(diagnostics, to: diagnosticsURL)
     let originalRoom = try Data(contentsOf: root.appendingPathComponent("room.json"))
     try RoomJSONValidator.validate(originalRoom, expectedCounts: counts)
+    try validateFrameFiles(root: root, report: report, files: payloadFiles(root))
 
     let manifest: [String: Any] = [
       "format": name, "schema_version": version, "scan_id": scanID, "room_id": scanID,
@@ -125,11 +200,19 @@ enum CaptureFormat {
     try eventData.write(to: root.appendingPathComponent("events.jsonl"), options: [.atomic, .completeFileProtection])
 
     var hashes: [String: Any] = [:]
-    for (path, url) in try payloadFiles(root) where path != "checksums.json" { hashes[path] = try fingerprint(url) }
+    // Keep each actual enumerated URL through read-back; do not reconstruct it
+    // by appending a sliced path to a potentially different sandbox URL spelling.
+    let sources = try payloadFiles(root).filter { $0.0 != "checksums.json" }
+    for (path, url) in sources {
+      do { hashes[path] = try fingerprint(url) }
+      catch { throw fileError(error, stage: "checksum", path: path) }
+    }
     try writeJSON(["algorithm": "sha256", "files": hashes], to: root.appendingPathComponent("checksums.json"))
-    for (path, value) in hashes {
-      let expected = value as! [String: Any]
-      let actual = try fingerprint(root.appendingPathComponent(path))
+    for (path, source) in sources {
+      let expected = hashes[path] as! [String: Any]
+      let actual: [String: Any]
+      do { actual = try fingerprint(source) }
+      catch { throw fileError(error, stage: "checksum read-back", path: path) }
       guard actual["sha256"] as? String == expected["sha256"] as? String else {
         throw error("Checksum read-back failed for \(path).")
       }
@@ -178,7 +261,10 @@ enum ScanArchive {
     defer { try? output.close(); try? FileManager.default.removeItem(at: temporary) }
     var directory = Data()
     for (path, url) in files {
-      let (checksum, size) = try crc(url)
+      let checked: (UInt32, UInt32)
+      do { checked = try crc(url) }
+      catch { throw CaptureFormat.fileError(error, stage: "ZIP checksum", path: path) }
+      let (checksum, size) = checked
       let name = Data(path.utf8)
       let offset = try output.offset()
       guard offset < UInt64(UInt32.max), name.count < Int(UInt16.max) else { throw CaptureFormat.error("Scan ZIP is too large.") }
@@ -186,7 +272,9 @@ enum ScanArchive {
       header += number(UInt16(0)) + number(UInt16(0)) + number(UInt16(33)) + number(checksum)
       header += number(size) + number(size) + number(UInt16(name.count)) + number(UInt16(0)) + name
       try output.write(contentsOf: header)
-      let input = try FileHandle(forReadingFrom: url)
+      let input: FileHandle
+      do { input = try FileHandle(forReadingFrom: url) }
+      catch { throw CaptureFormat.fileError(error, stage: "ZIP read", path: path) }
       do {
         while let data = try input.read(upToCount: 1_048_576), !data.isEmpty { try output.write(contentsOf: data) }
         try input.close()

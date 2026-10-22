@@ -6,13 +6,14 @@ Record source commit, Codemagic build ID, app version, device/iOS, scan UUID, ZI
 
 - Geometry-only 0.1.1 (2): real room JSON and matching completed diagnostics supplied/checked on 22 October 2026.
 - Full capture 0.2.0 (3): simulator compilation and all 22 native tests passed in the supplied Codemagic logs. Simulator lifecycle/fixture retrieval now works. The independent ZIP check reached a filename mismatch; equivalent UTF-8 NFC/NFD names reproduce it locally and are now handled, with actual-name diagnostics retained. The corrected cloud ZIP check/device release build need a rerun. Install/capture, physical alignment and first reconstruction remain **pending**.
+- Later supplied 0.2.0 (3) phone diagnostics show capture reached packaging with 109 recorded frames (32 train/77 check) and processed RoomPlan geometry, then failed opening a depth file. No completed package was established. Version 0.2.1 (4) corrects path derivation and allows retry from existing files; its new native checks and device retry are **pending**.
 - Repeated capture, cancellation/restart/sharing/deletion on the new build: **pending**.
 - Commercial product release: **pending** the decisions in COMMERCIAL-USE.md.
 
 ## Device checks
 
 1. All Codemagic stages pass, including device Swift compilation, native XCTest and independent reading of the native ZIP fixture. Preserve logs/version.
-2. Install new IPA; verify 0.2.0 (3), support, recording authorisation and camera prompts.
+2. Install new IPA over the previous app; verify 0.2.1 (4), support, recording authorisation and camera prompts. Retry saving the retained failed capture before making another scan. If an asset is actually absent, verify a specific relative-path/stage error and no false completion.
 3. Deny camera: capture stays blocked, clear error/diagnostics remain. Allow access in Settings and retry.
 4. Complete room/check pass. Share ZIP; validate inventory, hashes, counts/geometry, matching diagnostics and frame calibration.
 5. Cancel during capture and processing; previous result stays shareable. Retry/complete another scan without overwriting prior attempts.

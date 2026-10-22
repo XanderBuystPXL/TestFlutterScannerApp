@@ -39,6 +39,10 @@ void main() {
               return status;
             case 'startScan':
               return start();
+            case 'retryLatestExport':
+              final result = await start();
+              status['canRetryExport'] = false;
+              return result;
             case 'shareLatestResult':
             case 'shareDiagnostics':
               return null;
@@ -96,6 +100,37 @@ void main() {
       isNotNull,
     );
   });
+
+  testWidgets(
+    'failed export can be retried from saved files without starting the camera',
+    (tester) async {
+      status['canRetryExport'] = true;
+      await open(tester, authorise: false);
+      await tester.tap(find.text('Retry saving last scan'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('retryLatestExport'));
+      expect(calls, isNot(contains('startScan')));
+      expect(find.text('Latest saved scan'), findsOneWidget);
+      expect(find.text('Retry saving last scan'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'retry export failure remains visible and keeps saved data retryable',
+    (tester) async {
+      status['canRetryExport'] = true;
+      start = () async => throw PlatformException(
+        code: 'file_write_failed',
+        message: 'Missing depth/frame-000075.f32',
+      );
+      await open(tester);
+      await tester.tap(find.text('Retry saving last scan'));
+      await tester.pumpAndSettle();
+      expect(find.text('Missing depth/frame-000075.f32'), findsOneWidget);
+      expect(find.text('Retry saving last scan'), findsOneWidget);
+      expect(calls, isNot(contains('startScan')));
+    },
+  );
 
   testWidgets('new package summary shows roles after restart and shares ZIP', (
     tester,

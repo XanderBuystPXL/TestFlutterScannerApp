@@ -122,12 +122,21 @@ final class ScanStore {
     events.append(["timestamp": now, "name": event, "details": details])
     object["events"] = events
     object["updatedAt"] = now
-    if let state = state { object["state"] = state }
+    if let state = state {
+      object["state"] = state
+      if ["failed", "cancelled", "interrupted", "packaging"].contains(state) { object.removeValue(forKey: "completedAt") }
+      if state == "packaging" { object.removeValue(forKey: "error") }
+    }
     if let permission = details["cameraPermission"] { object["cameraPermission"] = permission }
     if let error = error {
       let native = error as NSError
-      object["error"] = ["code": errorCode ?? "capture_failed", "message": native.localizedDescription,
-                         "domain": native.domain, "nativeCode": native.code]
+      var information: [String: Any] = ["code": errorCode ?? "capture_failed", "message": native.localizedDescription,
+                                       "domain": native.domain, "nativeCode": native.code]
+      for key in ["stage", "relativePath"] { if let value = native.userInfo[key] as? String { information[key] = value } }
+      if let underlying = native.userInfo[NSUnderlyingErrorKey] as? NSError {
+        information["underlyingDomain"] = underlying.domain; information["underlyingCode"] = underlying.code
+      }
+      object["error"] = information
     }
     try write(object, to: url)
   }
@@ -197,6 +206,17 @@ final class ScanStore {
   }
 
   func latestAttempt() throws -> [String: Any]? { try attempts().first }
+
+  func retryCandidate() throws -> [String: Any]? {
+    guard let attempt = try latestAttempt(), let id = attempt["scanId"] as? String,
+          let state = attempt["state"] as? String, ["failed", "interrupted"].contains(state),
+          attempt["capture"] is [String: Any], attempt["counts"] is [String: Any] else { return nil }
+    let root = try directory(id)
+    for path in ["room.json", "frames.jsonl", "roomplan/live-room.json", "roomplan/room.usdz", "roomplan/node-map.json"] {
+      guard manager.fileExists(atPath: root.appendingPathComponent(path).path) else { return nil }
+    }
+    return attempt
+  }
 
   func resultURLs() throws -> [URL] {
     guard let scan = try latestCompleted(), let id = scan["scanId"] as? String else {

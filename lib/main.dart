@@ -93,17 +93,21 @@ class _ScanTestPageState extends State<ScanTestPage>
     }
   }
 
-  Future<void> _scan() async {
-    if (!_authorised) return;
+  Future<void> _scan({bool retryExport = false}) async {
+    if (!retryExport && !_authorised) return;
     setState(() {
       _busy = true;
       _error = null;
-      _message = 'Scanning or processing. Use Finish or Cancel in the scanner.';
+      _message = retryExport
+          ? 'Retrying export from saved capture files. Keep the app open.'
+          : 'Scanning or processing. Use Finish or Cancel in the scanner.';
     });
     String message;
     String? errorMessage;
     try {
-      final completed = await widget.service.startScan();
+      final completed = retryExport
+          ? await widget.service.retryLatestExport()
+          : await widget.service.startScan();
       message = completed
           ? 'Scan saved. Share the files to inspect them on Windows.'
           : 'Scan cancelled. Diagnostic logs are available.';
@@ -270,6 +274,12 @@ class _ScanTestPageState extends State<ScanTestPage>
                     icon: const Icon(Icons.camera_alt_outlined),
                     label: const Text('Start scan'),
                   ),
+                  if (status?.canRetryExport == true)
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _scan(retryExport: true),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry saving last scan'),
+                    ),
                   OutlinedButton.icon(
                     onPressed: !_busy && scan != null
                         ? () => _share(diagnosticsOnly: false)
