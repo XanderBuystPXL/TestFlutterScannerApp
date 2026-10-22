@@ -28,6 +28,14 @@ cd TestFlutterScannerApp
 
 Connect this repository to Codemagic, rather than the team repository or the parent `IT-Project` folder. `.tools/`, build outputs, signing files and local settings are ignored. No signing credentials belong in this repository.
 
+### Install the shared test build on another PC
+
+1. Clone this repository, or run `git pull` in an existing copy.
+2. Find **`artifacts/RoomPlanTest-unsigned.ipa`**.
+3. Follow **section 3** below to sign and install it with Sideloadly on the PC connected to the iPhone. A new Codemagic build is not required to install this shared IPA.
+
+The `artifacts/` folder deliberately includes shared test IPAs so teammates can pull them. Other IPA/build-output locations remain ignored. The shared IPA is unsigned; each installer signs it locally with their own Apple account. Installation and a real room scan still need to be tested on the iPhone.
+
 ## 2. Build in Codemagic
 
 1. Connect Codemagic to the **new standalone repository** and add it as an app.

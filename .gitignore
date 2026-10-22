@@ -14,6 +14,8 @@ coverage/
 *.log
 .DS_Store
 *.ipa
+# Deliberately shared test builds for teammates installing from another PC.
+!/artifacts/*.ipa
 *.p12
 *.mobileprovision
 .env
