@@ -9,6 +9,7 @@ import json
 import math
 import re
 from pathlib import Path, PurePosixPath
+import plistlib
 import stat
 import struct
 import tempfile
@@ -47,6 +48,17 @@ def json_bytes(data):
 
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def read_node_map(data):
+    """Apple exports may be binary/XML property lists even with a .json suffix."""
+    if data.startswith(b"bplist00") or data.lstrip().startswith((b"<?xml", b"<plist")):
+        value = plistlib.loads(data)
+    else:
+        value = json_bytes(data)
+    require(isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()),
+            "RoomPlan node map must map node names to identifier strings.")
+    return value
 
 
 class Package:
@@ -193,7 +205,7 @@ def validate(package):
         require(len(room.get(key, [])) == count, f"Room count differs: {key}")
     require(all("transform" in wall and "dimensions" in wall for wall in room["walls"]), "Missing wall geometry.")
     require(package.read(files["usdz"])[:4] == b"PK\x03\x04", "USDZ is not a ZIP container.")
-    require(isinstance(package.obj(files["node_map"]), (dict, list)), "Invalid RoomPlan node map.")
+    read_node_map(package.read(files["node_map"]))
     require(len(package.obj(files["live_room"]).get("walls", [])) > 0, "Missing live RoomPlan alignment evidence.")
     events = package.lines(files["events"])
     require(events and events == diag["events"] and events[-1]["name"] == "room_written_and_read_back", "Event log differs.")
@@ -328,8 +340,11 @@ def prepare(source, output):
             (root / d).mkdir()
         for name in ["manifest.json", "checksums.json", "diagnostics.json", "frames.jsonl", "events.jsonl"]:
             (root / "evidence" / name).write_bytes(package.read(name))
-        for name, dest in [("room.json", "room.json"), ("roomplan/room.usdz", "room.usdz"), ("roomplan/node-map.json", "node-map.json"), ("roomplan/live-room.json", "live-room.json")]:
+        for name, dest in [("room.json", "room.json"), ("roomplan/room.usdz", "room.usdz"), ("roomplan/live-room.json", "live-room.json")]:
             (root / "geometry" / dest).write_bytes(package.read(name))
+        node_bytes = package.read("roomplan/node-map.json")
+        (root / "geometry" / "node-map.original.bin").write_bytes(node_bytes)
+        write_json(root / "geometry" / "node-map.json", read_node_map(node_bytes))
         alignment = room_alignment(package.obj("roomplan/live-room.json"), package.obj("room.json"))
         write_json(root / "geometry" / "alignment.json", alignment)
         centers = np.array([f["camera_to_world"] for f in frames if f["role"] == "train"])[:, :3, 3]

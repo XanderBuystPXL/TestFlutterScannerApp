@@ -62,7 +62,7 @@ Preparation produces:
 - `points.npz`, `preview.ply`: bounded colored **training-only** LiDAR initialization, without predicted-depth models.
 - `transforms.json`: metric OpenGL/ARKit transforms and explicit train/validation filenames for compatible readers. Disable automatic orientation/rescaling when aligning geometry.
 - `sparse/0/*.bin`: COLMAP PINHOLE interchange with ARKit poses and sensor points, **not SfM results**. Empty feature tracks provide no SfM registration/reprojection evidence. Use the adapter to preserve explicit roles.
-- `geometry/`: original RoomPlan files and alignment fitted from matching live/processed wall IDs. No guessed interpretation of undocumented origin fields.
+- `geometry/`: original RoomPlan files and alignment fitted from matching live/processed wall IDs. Apple node metadata is accepted as JSON or a binary/XML property list, preserved byte-for-byte in `node-map.original.bin`, and normalized to genuine `node-map.json` for consumers. No guessed interpretation of undocumented origin fields.
 - `camera-path.ply`, `room-walls.ply` when alignment can be fitted, contact sheet and depth overlays for physical review. Previews retain metric capture coordinates.
 - `evidence/`, `intake-report.json`, `dataset-checksums.json`: original metadata and conversion provenance.
 
@@ -106,6 +106,8 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
 Use the intake environment for Python. Native XCTest/device compilation run on Codemagic. See [VALIDATION.md](VALIDATION.md) for actual results versus pending checks.
+
+The first completed 0.2.1 device package passes intake and interchange checks, but its training pass misses much of the room. Full pipeline integration remains pending a complete training route and actual reconstruction: [22 October scan review](docs/SCAN-REVIEW-2026-10-22.md).
 
 Commercial use is a design constraint: public Apple frameworks, Flutter notices, no bundled reconstruction model, recording disclosure, deletion and no hidden collection. [COMMERCIAL-USE.md](docs/COMMERCIAL-USE.md) records controls and remaining release decisions. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) separates app dependencies from optional research tooling.
 

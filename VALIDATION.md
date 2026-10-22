@@ -6,7 +6,7 @@ Source **0.2.1 (4)**, checked on Windows, 22 October 2026. Flutter 3.35.4 / Dart
 
 - Dart formatting and Flutter analysis: clean.
 - **15 Flutter tests:** recording authorisation, support checks, permission denial, completion, cancellation preserving an earlier result, native errors, restart summary/role counts, sharing, deletion confirmation, missing bridge and malformed results. New tests cover retry without starting the camera/recording consent and an actionable retry failure that preserves the saved attempt.
-- **41 Python tests:** old JSON checks/IPA tooling plus full synthetic package validation/preparation, timestamp/calibration/orientation rules, confidence/depth, corruption/inventory/path rejection, split isolation, train-only initialization/normalization, positive camera-Z conversion, processed/live room correction and dataset integrity. Tests also require privacy/licence assets for a full-capture IPA and reject an old app version. Eight native-ZIP-reader regressions cover equivalent NFC/NFD UTF-8 names, content/CRC errors, extra entries, name collisions, compression and missing UTF-8 flags.
+- **44 Python tests:** old JSON checks/IPA tooling plus full synthetic package validation/preparation, timestamp/calibration/orientation rules, confidence/depth, corruption/inventory/path rejection, split isolation, train-only initialization/normalization, positive camera-Z conversion, processed/live room correction and dataset integrity. Tests also require privacy/licence assets for a full-capture IPA and reject an old app version. Eight native-ZIP-reader regressions cover equivalent NFC/NFD UTF-8 names, content/CRC errors, extra entries, name collisions, compression and missing UTF-8 flags. Three new node-map regressions cover Apple binary/XML property lists, genuine JSON normalization with exact original-byte preservation, and invalid value rejection.
 - Independent **pycolmap** read of generated binary interchange: all 30 synthetic camera poses/calibrations and 570 sensor seed points read correctly. This checks serialization, not SfM registration or real-world quality.
 - Codemagic YAML parsed with the expected five stages and pinned SDKs. All generated stage scripts and packaging script passed shell syntax checks.
 - Property lists parsed; privacy manifest is registered as a Runner resource and new Swift files are registered in Sources.
@@ -30,7 +30,7 @@ Initially, after `TEST SUCCEEDED`, `simctl get_app_container` failed with CoreSi
 
 That rerun passed all 22 native tests again and passed the ZIP CRC check, then failed an exact filename assertion. The log does not include actual entry names. A valid decomposed-Unicode `fi\u0308le.txt` fixture reproduces the identical failure against the old checker, which expected composed `f\u00efle.txt`. The reader now compares canonical NFC names while reading the original entries and still rejects collisions, incorrect contents/CRC, non-UTF-8 Unicode names, compression and unexpected files. Failures show actual escaped filenames, and Codemagic retains the verification log/fixture. Actual archive-name confirmation and the corrected cloud rerun remain pending.
 
-Simulator success alone does not compile the RoomPlan-only device branches. The later supplied 0.2.0 phone evidence below establishes that a device build ran through capture; no new 0.2.1 IPA/native test run has been supplied. No macOS/Xcode is available locally; the accessible browser session requires Codemagic sign-in.
+Simulator success alone does not compile the RoomPlan-only device branches. The later phone evidence below establishes that 0.2.0 ran through capture and 0.2.1 produced a completed package. The new 0.2.1 native-test/build logs have not been supplied. No macOS/Xcode is available locally; the accessible browser session requires Codemagic sign-in.
 
 ## Device packaging failure and 0.2.1 recovery
 
@@ -42,12 +42,20 @@ The new Retry saving last scan action revalidates/repackages retained files with
 
 **28 native XCTest cases are defined**: six new regressions cover aliased/trailing-slash roots, a 109-frame export through an alias, actually missing frame 75, truncated depth, retry without recapture and child-symlink rejection. These new native tests await Codemagic. All Swift sources passed a local tree-sitter syntax parse; this is not Swift type-checking or device acceptance.
 
+## Completed 0.2.1 real-device package
+
+The subsequently supplied `scan-80F3900A-A1AE-44EE-892F-628B511183DF.zip` is from **0.2.1 (4)** on iPhone13,3 / iOS 26.5. ZIP CRC, all 264 files/checksums, calibration, depth/confidence, roles, geometry counts and completed diagnostics pass. The independent COLMAP reader recovers all 85 cameras/poses and 37,997 training-only sensor seed points correctly. Desktop preparation and adapter preflight pass after accepting Apple's binary-property-list node map despite its `.json` suffix. This desktop-only correction requires no phone rebuild.
+
+The capture contains **22 training / 63 check frames**. The training route lasts 8.65 seconds and spans only 68.70 degrees of camera heading. Contact-sheet review and sampled depth reprojection identify insufficient training coverage: 46.46% of held-out depth samples lie outside every training camera frustum. The geometry and neighboring-depth consistency checks are encouraging but are not an independent measurement-accuracy guarantee. This package does **not** establish full-room splat quality or complete integration acceptance.
+
+See [the detailed scan review](docs/SCAN-REVIEW-2026-10-22.md) for package identity, methods, results and limits. Raw files, converted datasets and private inspection artifacts remain excluded from Git.
+
 ## Still required before integration
 
-1. Successful corrected Codemagic workflow through 28 native tests, ZIP verification, device build and new 0.2.1 (4) IPA.
-2. Install over the existing LiDAR iPhone app and retry the retained capture; independently validate a completed RGB/depth/RoomPlan ZIP. If assets are actually missing, retain diagnostics and capture a new scan.
-3. Physical alignment/scale/coverage review and exact exported-data checks.
-4. First actual GPU reconstruction, held-out renders/metrics and target-viewer alignment.
+1. Retain corrected Codemagic logs for 28 native tests, ZIP verification and device build. The supplied completed 0.2.1 package proves device capture/export execution, not that the entire CI workflow or all tests passed.
+2. Record a complete, overlapping **training** route around the whole room, then a separate shorter check route. The current package passes file validation but fails sufficient training coverage; do not relabel check frames as training to manufacture acceptance. Retry recovery of the older failed capture remains unverified.
+3. Repeat physical alignment/scale/coverage review on the new package; confirm scale against a real measurement. Current exact exported-data checks pass.
+4. First actual GPU reconstruction, held-out renders/metrics and target-viewer alignment on a sufficiently covered package. No actual training run was performed in this review because this capture fails the coverage prerequisite.
 5. Real-device cancellation, repeated scans, restart/sharing, interruption and deletion checks.
 6. Commercial release decisions/approvals in `docs/COMMERCIAL-USE.md`.
 

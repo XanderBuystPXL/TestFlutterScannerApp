@@ -3,6 +3,7 @@ import hashlib
 import io
 import importlib.util
 import json
+import plistlib
 from pathlib import Path
 import struct
 import tempfile
@@ -102,6 +103,27 @@ class CaptureTests(unittest.TestCase):
                     z.write(p, p.relative_to(self.root).as_posix())
         with Package(archive) as package:
             self.assertEqual(len(validate(package)[1]), 30)
+
+    def test_apple_binary_plist_node_map_is_accepted_and_normalized_for_processing(self):
+        mapping = {"Wall0": str(uuid.uuid4()).upper()}
+        original = plistlib.dumps(mapping, fmt=plistlib.FMT_BINARY)
+        (self.root / "roomplan" / "node-map.json").write_bytes(original)
+        rehash(self.root)
+        self.check()
+        out = prepare(self.root, Path(self.tmp.name) / "prepared")
+        self.assertEqual(json.loads((out / "geometry" / "node-map.json").read_text()), mapping)
+        self.assertEqual((out / "geometry" / "node-map.original.bin").read_bytes(), original)
+
+    def test_xml_plist_node_map_is_accepted(self):
+        (self.root / "roomplan" / "node-map.json").write_bytes(plistlib.dumps({"Wall0": "fixture"}))
+        rehash(self.root)
+        self.check()
+
+    def test_invalid_node_map_values_are_rejected(self):
+        write_json(self.root / "roomplan" / "node-map.json", {"Wall0": ["invalid"]})
+        rehash(self.root)
+        with self.assertRaisesRegex(ValueError, "node map"):
+            self.check()
 
     def test_changed_rgb_bytes_rejected(self):
         (self.root / self.frames[0]["rgb_path"]).write_bytes(b"tampered")
