@@ -1,0 +1,50 @@
+workflows:
+  roomplan-device-test:
+    name: RoomPlan test - unsigned iPhone IPA
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.35.4
+      xcode: 16.4
+      cocoapods: default
+    scripts:
+      - name: Check pinned SDK and resolve packages
+        script: |
+          set -euo pipefail
+          test "$(git -C "$FLUTTER_ROOT" rev-parse HEAD)" = "d693b4b9dbac2acd4477aea4555ca6dcbea44ba2"
+          flutter --version
+          xcodebuild -version
+          flutter pub get --enforce-lockfile
+      - name: Analyze and test Flutter
+        script: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --no-pub
+          flutter test --no-pub --reporter expanded
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Compile simulator and test native storage
+        script: |
+          set -euo pipefail
+          mkdir -p build/test-results
+          flutter build ios --simulator --debug --no-codesign --no-pub 2>&1 | tee build/test-results/simulator-build.log
+          DEVICE_ID=$(xcrun simctl list devices available --json | python3 scripts/select_simulator.py)
+          xcodebuild test \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath build/test-results/RunnerTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/test-results/native-tests.log
+      - name: Compile unsigned iPhone release
+        script: |
+          set -euo pipefail
+          mkdir -p build/test-results
+          flutter build ios --release --no-codesign --no-pub 2>&1 | tee build/test-results/device-build.log
+      - name: Package and check IPA
+        script: bash scripts/package_ipa.sh
+    artifacts:
+      - build/ipa/*.ipa
+      - build/test-results/*.log
+      - build/test-results/*.xcresult
+      - /tmp/xcodebuild_logs/*.log
