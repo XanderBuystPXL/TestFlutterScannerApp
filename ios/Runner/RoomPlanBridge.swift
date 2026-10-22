@@ -74,8 +74,10 @@ final class RoomPlanBridge {
   }
 
   private func status() -> [String: Any] {
+    let device = deviceInfo()
     var value: [String: Any] = ["supported": supported, "supportMessage": supportMessage,
-                                "cameraPermission": permission, "hasDiagnostics": false]
+                                "cameraPermission": permission, "hasDiagnostics": false,
+                                "buildLabel": "\(device["appVersion"] ?? "unknown") (\(device["appBuild"] ?? "unknown"))"]
     do {
       let store = try requireStore()
       if let scan = try store.latestCompleted() { value["latestScan"] = scan }
@@ -196,16 +198,12 @@ final class RoomPlanBridge {
       let counts = ["walls": room.walls.count, "doors": room.doors.count,
                     "windows": room.windows.count, "objects": room.objects.count,
                     "openings": room.openings.count, "floors": room.floors.count]
-      let summary = try requireStore().complete(id, roomData: encoder.encode(room), counts: counts) { data in
-        let decoded = try JSONDecoder().decode(CapturedRoom.self, from: data)
-        guard decoded.identifier == room.identifier,
-              decoded.walls.count == room.walls.count,
-              decoded.doors.count == room.doors.count,
-              decoded.windows.count == room.windows.count,
-              decoded.objects.count == room.objects.count else {
-          throw NSError(domain: "RoomPlanDeviceTest.Export", code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "The saved room did not match the captured result."])
-        }
+      let data = try encoder.encode(room)
+      guard record("room_export_encoded", details: ["counts": counts,
+        "capturedRoomIdentifier": room.identifier.uuidString, "bytes": data.count,
+        "validation": "encoded_json_and_exact_readback"]) else { return }
+      let summary = try requireStore().complete(id, roomData: data, counts: counts) { exported in
+        try RoomJSONValidator.validate(exported, expectedCounts: counts)
       }
       resolve(["status": "completed", "scan": summary])
     } catch {

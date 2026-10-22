@@ -15,6 +15,10 @@ This is a geometry/export test. It does not capture RGB datasets or depth maps, 
 
 The app is named **RoomPlan Test**, with bundle ID `be.aproxx.roomplanDeviceTest`.
 
+**Save-check fix: source version 0.1.1 (2).** If the phone reports “The saved room did not match the captured result,” rebuild the latest `main` in Codemagic and install the newly generated IPA. The updated home screen shows **App version: 0.1.1 (2)**. The original IPA currently checked into `artifacts/` is still 0.1.0 (1) and does not contain this fix.
+
+The fix validates Apple's encoded JSON and compares the saved bytes directly with the original export. It no longer treats the identity of a second, decoded RoomPlan object as a file-integrity check. Invalid geometry/counts and changed file bytes still fail with a specific error.
+
 ## 1. Open the standalone repository
 
 Repository: [XanderBuystPXL/TestFlutterScannerApp](https://github.com/XanderBuystPXL/TestFlutterScannerApp).
@@ -92,7 +96,7 @@ With Python 3 installed, run:
 py scripts/validate_scan.py "C:\path\to\exported-scan"
 ```
 
-The validator checks JSON readability, the completed state and scan ID, the successful read-back event, wall geometry fields, and matching counts across both files. Also inspect the room's coverage on the phone: parsing JSON cannot establish geometric accuracy or a complete room.
+The validator checks JSON readability, the completed state and scan ID, the successful read-back event, wall geometry fields, and matching counts across both files. Omitted empty collections count as zero; omitted non-empty collections fail. Also inspect the room's coverage on the phone: parsing JSON cannot establish geometric accuracy or a complete room.
 
 Use this checklist for device acceptance:
 

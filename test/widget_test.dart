@@ -21,6 +21,7 @@ void main() {
       'supported': true,
       'supportMessage': 'RoomPlan is supported on this device.',
       'cameraPermission': 'not_determined',
+      'buildLabel': '0.1.1 (2)',
       'hasDiagnostics': false,
     };
     calls = [];
@@ -64,6 +65,7 @@ void main() {
     (tester) async {
       await open(tester);
       expect(find.text('Start scan'), findsOneWidget);
+      expect(find.text('App version: 0.1.1 (2)'), findsOneWidget);
       expect(
         tester
             .widget<FilledButton>(

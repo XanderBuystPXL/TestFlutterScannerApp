@@ -1,5 +1,47 @@
 import Foundation
 
+/// Validate the portable JSON, without constructing another framework-owned room.
+enum RoomJSONValidator {
+  static func validate(_ data: Data, expectedCounts: [String: Int]) throws {
+    guard let room = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw failure("Exported room JSON must contain an object.")
+    }
+    guard (expectedCounts["walls"] ?? 0) > 0 else {
+      throw failure("No walls were captured. Scan more of the room and retry.")
+    }
+    for name in expectedCounts.keys.sorted() {
+      let expected = expectedCounts[name]!
+      // Apple may omit an empty collection. A non-empty collection must exist.
+      if room[name] == nil && expected == 0 { continue }
+      guard let entries = room[name] as? [Any] else {
+        throw failure("Exported room JSON is missing the \(name) array (expected \(expected) entries).")
+      }
+      guard entries.count == expected else {
+        throw failure("Exported \(name) count differs: captured \(expected), JSON contains \(entries.count).")
+      }
+    }
+    guard let walls = room["walls"] as? [[String: Any]], !walls.isEmpty else {
+      throw failure("Exported walls must contain room geometry.")
+    }
+    for (index, wall) in walls.enumerated() {
+      guard wall["transform"] != nil, wall["dimensions"] != nil else {
+        throw failure("Exported wall \(index) is missing its transform or dimensions.")
+      }
+    }
+  }
+
+  static func verifyReadBack(_ saved: Data, matches original: Data) throws {
+    guard saved == original else {
+      throw failure("The bytes read from room.json differ from the exported JSON (expected \(original.count) bytes, read \(saved.count)).")
+    }
+  }
+
+  private static func failure(_ message: String) -> NSError {
+    NSError(domain: "RoomPlanDeviceTest.Export", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message])
+  }
+}
+
 /// Only file storage lives here, so simulator tests do not need RoomPlan or a camera.
 final class ScanStore {
   let baseURL: URL
@@ -89,7 +131,9 @@ final class ScanStore {
     try validate(roomData)
     let roomURL = try directory(id).appendingPathComponent("room.json")
     try roomData.write(to: roomURL, options: .atomic)
-    try validate(Data(contentsOf: roomURL))
+    let savedData = try Data(contentsOf: roomURL)
+    try RoomJSONValidator.verifyReadBack(savedData, matches: roomData)
+    try validate(savedData)
 
     let url = try diagnosticsURL(id)
     var object = try read(url)
@@ -99,7 +143,9 @@ final class ScanStore {
     object["completedAt"] = now
     object["counts"] = counts
     var events = object["events"] as? [[String: Any]] ?? []
-    events.append(["timestamp": now, "name": "room_written_and_read_back"])
+    events.append(["timestamp": now, "name": "room_written_and_read_back",
+                   "details": ["bytes": savedData.count, "byteMatch": true,
+                               "validation": "encoded_json_and_exact_readback"]])
     object["events"] = events
     // Diagnostics are the commit marker: an orphan room.json is never a completed scan.
     try write(object, to: url)

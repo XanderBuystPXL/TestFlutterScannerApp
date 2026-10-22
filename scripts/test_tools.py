@@ -66,6 +66,19 @@ class ExportValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No wall"):
             validate(self.folder)
 
+    def test_missing_empty_collections_pass(self):
+        for key in ("doors", "windows", "objects"):
+            del self.room[key]
+        self.save()
+        self.assertEqual(validate(self.folder)[1]["objects"], 0)
+
+    def test_missing_nonempty_collection_fails(self):
+        del self.room["doors"]
+        self.diagnostics["counts"]["doors"] = 1
+        self.save()
+        with self.assertRaisesRegex(ValueError, "doors count differs"):
+            validate(self.folder)
+
 
 class IpaValidationTests(unittest.TestCase):
     def setUp(self):

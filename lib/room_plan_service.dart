@@ -28,6 +28,7 @@ class RoomPlanStatus {
     this.hasDiagnostics = false,
     this.latestAttemptState,
     this.storageWarning,
+    this.buildLabel,
   });
 
   factory RoomPlanStatus.fromMap(Map<String, dynamic> map) => RoomPlanStatus(
@@ -42,6 +43,7 @@ class RoomPlanStatus {
     hasDiagnostics: map['hasDiagnostics'] as bool? ?? false,
     latestAttemptState: map['latestAttemptState'] as String?,
     storageWarning: map['storageWarning'] as String?,
+    buildLabel: map['buildLabel'] as String?,
   );
 
   final bool supported;
@@ -51,6 +53,7 @@ class RoomPlanStatus {
   final bool hasDiagnostics;
   final String? latestAttemptState;
   final String? storageWarning;
+  final String? buildLabel;
 }
 
 class RoomPlanService {

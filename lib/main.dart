@@ -193,6 +193,8 @@ class _ScanTestPageState extends State<ScanTestPage>
                   if (status != null) ...[
                     Text(status.supportMessage),
                     Text('Camera permission: ${status.cameraPermission}'),
+                    if (status.buildLabel != null)
+                      Text('App version: ${status.buildLabel}'),
                     if (status.latestAttemptState != null)
                       Text('Latest attempt: ${status.latestAttemptState}'),
                   ],

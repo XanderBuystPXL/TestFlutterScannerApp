@@ -20,7 +20,8 @@ def validate(folder):
         raise ValueError("The log contains no successful read-back event.")
     counts = {}
     for name in ("walls", "doors", "windows", "objects"):
-        entries = room.get(name)
+        # Match the native validator: omitted empty collections count as zero.
+        entries = room.get(name, [])
         if not isinstance(entries, list):
             raise ValueError(f"room.json has no {name} array.")
         counts[name] = len(entries)
