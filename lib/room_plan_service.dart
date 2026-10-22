@@ -6,17 +6,23 @@ class ScanSummary {
     required this.scanId,
     required this.completedAt,
     required this.counts,
+    this.pipelineReady = false,
+    this.capture = const {},
   });
 
   factory ScanSummary.fromMap(Map<String, dynamic> map) => ScanSummary(
     scanId: map['scanId'] as String,
     completedAt: DateTime.parse(map['completedAt'] as String),
     counts: Map<String, int>.from(map['counts'] as Map),
+    pipelineReady: map['pipelineReady'] as bool? ?? false,
+    capture: Map<String, dynamic>.from(map['capture'] as Map? ?? {}),
   );
 
   final String scanId;
   final DateTime completedAt;
   final Map<String, int> counts;
+  final bool pipelineReady;
+  final Map<String, dynamic> capture;
 }
 
 class RoomPlanStatus {
@@ -99,4 +105,6 @@ class RoomPlanService {
 
   Future<void> shareDiagnostics() =>
       channel.invokeMethod<void>('shareDiagnostics');
+
+  Future<void> deleteAllScans() => channel.invokeMethod<void>('deleteAllScans');
 }

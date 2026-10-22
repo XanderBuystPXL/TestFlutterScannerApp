@@ -1,155 +1,111 @@
-# RoomPlan device test
+# RoomPlan capture pipeline test
 
-A standalone Flutter app to test this route: **Codemagic build → Windows sideload → real LiDAR scan → JSON export**. It is independent of the Aproxx team repository.
+Standalone Flutter/Swift app for **cloud build → Windows install → LiDAR capture → checked reconstruction dataset**. Source version **0.2.0 (3)**. The Aproxx team app is untouched.
 
-The Flutter screen opens a small native Swift RoomPlan scanner. Finish saves Apple's complete `CapturedRoom` JSON and a diagnostic log. The app reads the room back before reporting success. Previous completed scans remain available after failed or cancelled attempts.
+Captures one room using public Apple APIs: RGB photos, per-frame camera poses/intrinsics, synchronized scene depth/confidence, complete RoomPlan JSON, USDZ, node metadata, live geometry for alignment, events and checksums. Shares one ZIP. Desktop tools validate it and prepare inputs for the existing Gaussian-splat research pipeline.
 
-This is a geometry/export test. It does not capture RGB datasets or depth maps, generate USDZ or splats, upload scans, or implement authentication.
+**This version is implemented, not yet proven on the iPhone.** The previous geometry-only version produced a real room JSON successfully. The new capture, Codemagic build, installation, alignment and first reconstruction need [device acceptance](docs/ACCEPTANCE.md). Structural tests cannot prove physical calibration or reconstruction quality.
 
-## Requirements
+## Build and install
 
-- A real LiDAR-capable iPhone or iPad running **iOS 17 or later**. RoomPlan support is checked at runtime.
-- A separate remote Git repository and a Codemagic account to run the build. A personal Mac is not required.
-- Windows, a USB data cable, Sideloadly and an Apple account for installation.
-- No paid Apple Developer membership is assumed. Free-account apps need refreshing after **7 days** and are subject to Apple's sideloaded-app limits.
+1. Connect [this separate repository](https://github.com/XanderBuystPXL/TestFlutterScannerApp) to Codemagic. Select `main`, repository YAML and workflow **RoomPlan test - unsigned iPhone IPA**.
+2. Start a build. No signing credentials or App Store Connect account are needed for the unsigned workflow. Download the new `RoomPlanTest-unsigned.ipa` after all checks pass.
+3. On the Windows PC connected to the phone, install [Sideloadly](https://sideloadly.io/), follow its current Apple device-component setup, and connect the unlocked iPhone by USB. Accept Trust this computer.
+4. Select the IPA in Sideloadly, sign with your Apple account, complete verification and install. Trust the developer profile and enable Developer Mode when prompted. The device owner must approve phone security prompts; this does not bypass Face ID/passcode restrictions.
+5. Confirm **App version: 0.2.0 (3)**. For updates, use the same signing account/bundle identifier and install over the app to retain captures. Free provisioning normally needs refreshing after seven days; see [Sideloadly's FAQ](https://sideloadly.io/faq).
 
-The app is named **RoomPlan Test**, with bundle ID `be.aproxx.roomplanDeviceTest`.
+The IPA currently tracked in `artifacts/` is **0.1.0 (1)**. It does not contain this work. Teammates may replace it with the new verified artifact; keep the version clear in `artifacts/README.md`. Never commit captures or signing credentials.
 
-**Save-check fix: source version 0.1.1 (2).** If the phone reports “The saved room did not match the captured result,” rebuild the latest `main` in Codemagic and install the newly generated IPA. The updated home screen shows **App version: 0.1.1 (2)**. The original IPA currently checked into `artifacts/` is still 0.1.0 (1) and does not contain this fix.
+Bundle: `be.aproxx.roomplanDeviceTest`. Requires a real LiDAR iPhone/iPad, iOS 17+, RoomPlan and scene-depth support. Simulators and ordinary non-LiDAR iPhones cannot scan.
 
-The fix validates Apple's encoded JSON and compares the saved bytes directly with the original export. It no longer treats the identity of a second, decoded RoomPlan object as a file-integrity check. Invalid geometry/counts and changed file bytes still fail with a specific error.
+Codemagic pins Flutter **3.35.4**, revision `d693b4b9dbac2acd4477aea4555ca6dcbea44ba2` (team starter), and Xcode **16.4**, Mac mini M2. It runs Flutter checks, desktop intake tests, native simulator storage/package tests, an independent Python check of the Swift ZIP, then an unsigned arm64 release build. Logs, dependency inventories, notices and IPA are artifacts. App Store distribution needs its own current SDK/signing/privacy review.
 
-## 1. Open the standalone repository
+## Capture a room
 
-Repository: [XanderBuystPXL/TestFlutterScannerApp](https://github.com/XanderBuystPXL/TestFlutterScannerApp).
+1. Obtain permission to record the space and its contents. Remove people/private documents/screens. Confirm the recording authorisation checkbox and tap **Start scan**. Allow camera access.
+2. Walk slowly around a small, well-lit room. Keep overlapping views; move through the space rather than rotating in one spot. Cover walls/corners, floor, furniture and intended walkthrough areas. Photos save automatically, targeting three per second.
+3. After covering the room, tap **Record check pass**. Walk a separate short route with different viewpoints. Its RGB/depth are withheld from fitting/initialization by the adapter; ARKit and RoomPlan mapping are still shared.
+4. After at least ten check frames, tap **Finish**. Keep the app open and phone unlocked while saving. Completion requires processed room geometry, 20 training frames, ten check frames, camera movement, saved files and ZIP. These are sanity minima, not sufficient coverage targets.
+5. **Share scan files** transfers the full unredacted ZIP to your chosen Windows destination. **Share diagnostics** exports only the latest attempt's JSON log.
+6. Reopen and try sharing again. Previous completed scans survive failed/cancelled attempts. **Delete all local scans** removes complete/partial captures; shared/desktop copies need separate deletion.
 
-The existing local copy is already a separate Git repository. To get another copy, run:
+Captures stay local, excluded from device backup, with complete iOS file protection. No automatic upload or Photos-library writes. A chosen share destination has its own sync/retention. The information button opens dependency licences.
 
-```powershell
-git clone https://github.com/XanderBuystPXL/TestFlutterScannerApp.git
-cd TestFlutterScannerApp
-```
+Capture fails clearly on denied permission, unsupported hardware, interruption, relocalisation, missing usable depth, processing/storage errors or the 1800-frame limit. No interrupted coordinate spaces are silently joined. Partial photos/depth and diagnostics remain until deleted, without becoming completed results.
 
-Connect this repository to Codemagic, rather than the team repository or the parent `IT-Project` folder. `.tools/`, build outputs, signing files and local settings are ignored. No signing credentials belong in this repository.
+## Check the ZIP on Windows
 
-### Install the shared test build on another PC
-
-1. Clone this repository, or run `git pull` in an existing copy.
-2. Find **`artifacts/RoomPlanTest-unsigned.ipa`**.
-3. Follow **section 3** below to sign and install it with Sideloadly on the PC connected to the iPhone. A new Codemagic build is not required to install this shared IPA.
-
-The `artifacts/` folder deliberately includes shared test IPAs so teammates can pull them. Other IPA/build-output locations remain ignored. The shared IPA is unsigned; each installer signs it locally with their own Apple account. Installation and a real room scan still need to be tested on the iPhone.
-
-## 2. Build in Codemagic
-
-1. Connect Codemagic to the **new standalone repository** and add it as an app.
-2. Choose the YAML configuration from the repository root, `codemagic.yaml`.
-3. Select the `main` branch and workflow **RoomPlan test - unsigned iPhone IPA** (`roomplan-device-test`). Start the build manually.
-4. Leave iOS signing and App Store Connect integration unconfigured. This workflow deliberately produces unsigned output for local re-signing.
-5. After all stages succeed, download **RoomPlanTest-unsigned.ipa** from the build artifacts.
-6. If a stage fails, download its build logs. Do not treat a failed or skipped native build as successful verification.
-
-The configuration pins **Flutter 3.35.4**, revision `d693b4b9dbac2acd4477aea4555ca6dcbea44ba2`, matching the team starter at the time this test was created. It pins **Xcode 16.4** on Codemagic's Mac mini M2 image. These settings are intended for this sideloaded test, not App Store submission.
-
-The workflow runs Flutter analysis and tests, Python file/package checks, a simulator build and native storage tests, then an unsigned **arm64 iPhone release build**. It packages `Payload/Runner.app` into the IPA and verifies its layout and device metadata. Simulator tests cannot exercise RoomPlan capture.
-
-## 3. Install from Windows with Sideloadly
-
-1. Download Sideloadly from [its official site](https://sideloadly.io/). Follow its current Windows instructions for the Apple device components; it currently requests Apple's web versions of iTunes and iCloud rather than the Microsoft Store versions.
-2. Connect the unlocked iPhone by USB. Accept **Trust this computer** on the phone and confirm it appears in Sideloadly.
-3. Select **RoomPlanTest-unsigned.ipa** in Sideloadly. Keep the normal Apple-account signing/install mode; no jailbreak or injected libraries are needed.
-4. Sign in with your own Apple account and complete Apple's verification prompts. Start installation. Sideloadly signs the app before installing it; an unsigned IPA cannot be opened directly on the phone.
-5. On the iPhone, trust the developer entry under **Settings → General → VPN & Device Management** when prompted.
-6. Enable **Settings → Privacy & Security → Developer Mode** if requested, restart the phone and confirm it. Available prompts can vary by iOS version.
-7. Open **RoomPlan Test**.
-
-For updates, use the same Apple account and bundle ID and install over the existing app. Avoid uninstalling while you still need saved scans. Keep exported files backed up. Free-account installations normally expire after 7 days; re-sign/reinstall or use Sideloadly's refresh feature.
-
-If installation fails, save the Sideloadly error and record the phone model/iOS version. The build and packaging checks alone do not prove that a given phone accepts the IPA.
-
-## 4. Make the first test scan
-
-1. Use a small, well-lit room. Tap **Start scan** and allow camera access.
-2. Move slowly around the room, following Apple's guidance. Include the walls, corners and a doorway or window.
-3. Tap **Finish**. Wait for processing and the **Scan saved** message. The app requires at least one detected wall; this is a file-generation threshold, not a full-room quality guarantee.
-4. Check the wall, door, window and object counts shown on the screen.
-5. Tap **Share scan files**. Save both files to Files/OneDrive/iCloud Drive or another available share destination, then transfer them to Windows. There is no scan upload API in this app.
-6. Put the matching `room.json` and `diagnostics.json` in one folder on Windows. Keep exports from different scans in separate folders.
-
-Local storage on the phone:
-
-```text
-Documents/RoomPlanTest/<scan-uuid>/
-  room.json
-  diagnostics.json
-```
-
-`room.json` is written only after RoomPlan provides a processed room. Diagnostics are the completion marker. An incomplete attempt may contain no room file, or an uncommitted room file if final validation/writing failed. It is never listed as a completed scan.
-
-**Share scan files** shares the latest successful scan and its matching diagnostics. **Share diagnostics** shares the latest attempt's log, including failures or cancellation. Starting another scan does not delete earlier folders. There is no scan-history browser in this test.
-
-## 5. Validate the exported files on Windows
-
-With Python 3 installed, run:
+Use Python **3.11+**. Intake needs NumPy and Pillow, no CUDA or model weights.
 
 ```powershell
-py scripts/validate_scan.py "C:\path\to\exported-scan"
+py -3 -m venv .tools\intake
+.\.tools\intake\Scripts\python -m pip install -r scripts\requirements.txt
+.\.tools\intake\Scripts\python scripts\capture_pipeline.py validate "C:\path\scan-UUID.zip"
+.\.tools\intake\Scripts\python scripts\capture_pipeline.py prepare "C:\path\scan-UUID.zip" "datasets\room-01"
+.\.tools\intake\Scripts\python scripts\run_poc.py "datasets\room-01" --check-only
 ```
 
-The validator checks JSON readability, the completed state and scan ID, the successful read-back event, wall geometry fields, and matching counts across both files. Omitted empty collections count as zero; omitted non-empty collections fail. Also inspect the room's coverage on the phone: parsing JSON cannot establish geometric accuracy or a complete room.
+Use a new dataset folder for every conversion; existing outputs are never overwritten. Raw ZIPs belong in ignored `captures/`, prepared data in ignored `datasets/`, on an access-controlled disk outside public sync.
 
-Use this checklist for device acceptance:
+Validation checks exact inventory/SHA-256, timestamps, roles, image dimensions/orientation, rigid poses, depth size/units/confidence, camera rays, geometry/counts, events and capture sanity. Bounded ZIP reads reject unsafe paths, symlinks, duplicates and excessive compression. Hashes detect corruption, not sender identity.
 
-- [x] Codemagic's native tests and release build succeed and the IPA downloads.
-- [ ] Sideloadly installs the app and it launches independently.
-- [ ] A real room produces non-empty geometry and both exports pass validation on Windows.
-- [ ] Cancel a new scan; the previous successful scan remains shareable.
-- [ ] Deny camera permission; the app explains how to recover and diagnostics can be shared. Grant permission in Settings and retry.
-- [ ] Make a second successful scan; its counts/files become the latest result.
-- [ ] Close and reopen the app; the saved result is still shareable.
-- [ ] Background the app during capture; it reports an interruption rather than success. Force-closing an attempt is recorded as interrupted on the next launch.
+Preparation produces:
 
-## Diagnostics and errors
+- `images/`, `pipeline.json`: photos and explicit camera/role data.
+- `sensor_depth/`: normalized training-only depth, masks, intrinsics and the trainer's report contract. `holdout_depth/` stays separate from fitting.
+- `points.npz`, `preview.ply`: bounded colored **training-only** LiDAR initialization, without predicted-depth models.
+- `transforms.json`: metric OpenGL/ARKit transforms and explicit train/validation filenames for compatible readers. Disable automatic orientation/rescaling when aligning geometry.
+- `sparse/0/*.bin`: COLMAP PINHOLE interchange with ARKit poses and sensor points, **not SfM results**. Empty feature tracks provide no SfM registration/reprojection evidence. Use the adapter to preserve explicit roles.
+- `geometry/`: original RoomPlan files and alignment fitted from matching live/processed wall IDs. No guessed interpretation of undocumented origin fields.
+- `camera-path.ply`, `room-walls.ply` when alignment can be fitted, contact sheet and depth overlays for physical review. Previews retain metric capture coordinates.
+- `evidence/`, `intake-report.json`, `dataset-checksums.json`: original metadata and conversion provenance.
 
-Logs contain the scan ID, hardware model identifier, iOS/app versions, support and permission checks, attempt state, timestamped events, geometry counts, and available native errors. They do not contain photographs, Apple account credentials or raw camera footage. Room geometry still describes the scanned space; share test captures deliberately.
+Review overlays, contact sheet and point clouds before training. Open PLYs together in an approved viewer. Check upright orientation, distances, depth edges, camera positions, wall placement and drift. Follow [ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
-States include `checking`, `requesting_permission`, `scanning`, `processing`, `completed`, `cancelled`, `failed` and `interrupted`. Repeated Finish taps are ignored; processing has a 90-second timeout. Cancellation during processing ignores any late result.
+## Existing GPU reconstruction
 
-If storage is full or inaccessible, the app may be unable to save even its diagnostic log; it reports that limitation on screen. If an app crashes before its last event is flushed, its log may end earlier than the failure.
+In the existing CUDA PoC environment, use this wrapper rather than the Android/SfM loader directly:
 
-## Development and checks
+```powershell
+python scripts\run_poc.py "datasets\room-01" --poc-root "..\Research\PoC-Android" --out "datasets\room-01-run" --steps 3000 --factor 2 --alignment-reviewed
+```
 
-Use Flutter 3.35.4. The local preparation may leave an ignored SDK under `.tools/flutter`; it is not part of the deliverable or required by Codemagic. On Windows, Dart/Flutter tests run locally; building this iOS target requires the Codemagic Mac or another Mac with Xcode.
+`--alignment-reviewed` records an operator acknowledgement, not automatic certification. The wrapper replaces the trainer's scene loader **inside that Python process only**, preserving roles, calibration, normalization and train-only sensor depth. Research and the team app are not edited. Keep the PoC's CUDA/PyTorch/gsplat/pycolmap/OpenCV/SciPy environment; do not replace it with the small intake requirements.
+
+Normalization uses training cameras only. CV poses use `T_cv = T_arkit @ diag(1,-1,-1,1)`. Depth in positive camera-Z metres receives the same scale as points/translations. Reverse `scene.json` origin/scale to put splats in metric capture coordinates; use `geometry/alignment.json` for processed-room correction.
+
+The wrapper reuses held-out RGB metrics/splat export and records source fingerprints in `iphone-intake.json`. The PoC's existing metric note about an interleaved path is superseded by that record: this adapter uses a separate check pass with shared mapping. Process completion alone does not prove room completeness or commercial readiness.
+
+## Interface and development
+
+Contract: [CAPTURE-FORMAT.md](docs/CAPTURE-FORMAT.md). Channel: `be.aproxx.roomplan_device_test/scanner`.
+
+| Method | Behaviour |
+| --- | --- |
+| `getStatus` | Support, permission, latest result, capture counts, `pipelineReady`, diagnostics |
+| `startScan` | Completes after geometry/package commit, or returns cancellation/native error |
+| `shareLatestResult` | One ZIP for new captures; two JSON files for legacy results |
+| `shareDiagnostics` | Latest attempt's JSON log |
+| `deleteAllScans` | Removes UUID attempt directories; blocked during capture/packaging |
+
+`pipelineReady` means a completed archive exists, **not** that alignment, reconstruction or commercial approval passed. Legacy scans remain shareable with an explanation.
 
 ```powershell
 flutter pub get --enforce-lockfile
 dart format --output=none --set-exit-if-changed lib test
 flutter analyze --no-pub
 flutter test --no-pub
-py -m unittest discover -s scripts -p "test_*.py" -v
+python -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
-The `ios/RunnerTests` tests cover native storage persistence, cancellation, read-back failures, empty geometry, interrupted attempts, invalid paths and storage errors. Codemagic runs these on an iOS simulator; their synthetic fixtures are not real scans.
+Use the intake environment for Python. Native XCTest/device compilation run on Codemagic. See [VALIDATION.md](VALIDATION.md) for actual results versus pending checks.
 
-Channel: `be.aproxx.roomplan_device_test/scanner`.
+Commercial use is a design constraint: public Apple frameworks, Flutter notices, no bundled reconstruction model, recording disclosure, deletion and no hidden collection. [COMMERCIAL-USE.md](docs/COMMERCIAL-USE.md) records controls and remaining release decisions. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) separates app dependencies from optional research tooling.
 
-| Method | Result |
-| --- | --- |
-| `getStatus` | Support message, permission state, latest successful summary and diagnostic availability |
-| `startScan` | `{status: completed, scan: ...}` or `{status: cancelled}`; failures use `FlutterError` |
-| `shareLatestResult` | Share sheet for the latest completed room and matching log |
-| `shareDiagnostics` | Share sheet for the latest attempt's log |
+## Primary references
 
-Stable error codes include `unsupported_device`, `permission_denied`, `permission_restricted`, `busy`, `capture_failed`, `capture_interrupted`, `processing_timeout`, `empty_scan`, `file_write_failed`, `share_failed` and `scanner_unavailable`.
-
-## Verification status
-
-Local Flutter analysis and automated Flutter/Python checks are recorded in `VALIDATION.md`. The native Xcode checks, Codemagic IPA and real-device acceptance remain pending until the separate repository is connected and the workflow is run. No iPhone scan is included or fabricated.
-
-## References
-
-- [Apple RoomPlan](https://developer.apple.com/augmented-reality/roomplan/)
-- [RoomCaptureView processed-result callback](https://developer.apple.com/documentation/roomplan/roomcaptureviewdelegate/captureview(didpresent:error:))
-- [Codemagic unsigned builds](https://docs.codemagic.io/yaml-quick-start/first-signed-build/)
-- [Codemagic Xcode 16.4 image](https://docs.codemagic.io/specs-macos/xcode-16-4/)
-- [Sideloadly installation and refresh FAQ](https://sideloadly.io/faq)
+- [Apple shared-session scanning](https://developer.apple.com/documentation/roomplan/scanning-the-rooms-of-a-single-structure)
+- [Apple depth data](https://developer.apple.com/documentation/arkit/ardepthdata)
+- [RoomPlan export and metadata](https://developer.apple.com/videos/play/wwdc2023/10192/)
+- [Codemagic Xcode image](https://docs.codemagic.io/specs-macos/xcode-16-4/)
+- [Sideloadly](https://sideloadly.io/faq)

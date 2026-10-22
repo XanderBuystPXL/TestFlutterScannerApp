@@ -20,5 +20,5 @@ ditto "$app" "$stage/Payload/Runner.app"
 # zip updates existing archives; remove only this workflow's exact output first.
 if [ -f "$output" ]; then rm -- "$output"; fi
 (cd "$stage" && zip -q -r -y "$output" Payload)
-python3 scripts/verify_ipa.py "$output"
+python3 scripts/verify_ipa.py "$output" --capture-controls
 printf 'Unsigned IPA ready for local re-signing: %s\n' "$output"

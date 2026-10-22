@@ -137,4 +137,86 @@ final class RunnerTests: XCTestCase {
     XCTAssertEqual(details?["byteMatch"] as? Bool, true)
     XCTAssertEqual(details?["validation"] as? String, "encoded_json_and_exact_readback")
   }
+
+  func testDepthRowsStripPaddingAndRejectInvalidLayouts() throws {
+    let padded = Data([1,2,3,4,99,99,5,6,7,8,99,99])
+    XCTAssertEqual(try CaptureFormat.packRows(padded, rowBytes: 4, stride: 6, height: 2), Data([1,2,3,4,5,6,7,8]))
+    XCTAssertThrowsError(try CaptureFormat.packRows(padded, rowBytes: 8, stride: 6, height: 2))
+    XCTAssertThrowsError(try CaptureFormat.packRows(padded, rowBytes: 4, stride: Int.max, height: 2))
+  }
+
+  func testMatrixSerializationTransposesSIMDColumns() {
+    XCTAssertEqual(CaptureFormat.rows([[1,2,3],[4,5,6],[7,8,9]]), [[1,4,7],[2,5,8],[3,6,9]])
+  }
+
+  func testPackageRequiresMovementAndBothPasses() {
+    let valid: [String: Any] = ["train_frames": 20, "validation_frames": 10, "training_camera_span_metres": 0.5]
+    XCTAssertNoThrow(try CaptureFormat.validateCaptureReport(valid))
+    for field in ["train_frames", "validation_frames", "training_camera_span_metres"] {
+      var changed = valid; changed[field] = 0
+      XCTAssertThrowsError(try CaptureFormat.validateCaptureReport(changed))
+    }
+  }
+
+  func testDeletionRemovesFailedAndCompletedCapturesAndPreservesUnrelatedFiles() throws {
+    let id = try begin(); try complete(id)
+    let failed = try begin(); try store.record(failed, event: "failed", state: "failed")
+    let other = folder.appendingPathComponent("keep.txt")
+    try Data("keep".utf8).write(to: other)
+    try store.deleteAll()
+    XCTAssertTrue(try store.attempts().isEmpty)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+  }
+
+  func testMissingArchiveNeverBecomesPipelineReady() throws {
+    let id = try begin(); try complete(id)
+    let url = try store.diagnosticsURL(id)
+    var diag = try CaptureFormat.readJSON(url)
+    diag["capture"] = ["train_frames": 20]
+    try CaptureFormat.writeJSON(diag, to: url)
+    XCTAssertNil(try store.latestCompleted())
+    try store.recoverInterruptedAttempts()
+    XCTAssertEqual(try CaptureFormat.readJSON(url)["state"] as? String, "interrupted")
+  }
+
+  func testSHA256KnownVectorAndNativeZIPFixture() throws {
+    let fixture = folder.appendingPathComponent("fixture", isDirectory: true)
+    try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+    let text = fixture.appendingPathComponent("payload.txt")
+    try Data("123456789".utf8).write(to: text)
+    let unicode = fixture.appendingPathComponent("fïle.txt")
+    try Data("unicode".utf8).write(to: unicode)
+    XCTAssertEqual(try CaptureFormat.fingerprint(text)["sha256"] as? String,
+      "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225")
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let archive = documents.appendingPathComponent("zip-writer-fixture.zip")
+    try ScanArchive.write(root: fixture, to: archive)
+    let bytes = try Data(contentsOf: archive)
+    XCTAssertEqual(Array(bytes.prefix(4)), [0x50, 0x4b, 0x03, 0x04])
+    XCTAssertNotNil(bytes.range(of: Data([0x26, 0x39, 0xF4, 0xCB]))) // Standard CRC32 of 123456789.
+    XCTAssertNotNil(bytes.range(of: Data([0x50, 0x4b, 0x05, 0x06])))
+    // Codemagic reads this synthetic fixture independently with Python's zipfile.
+  }
+
+  func testPackageCommitRequiresArchiveAndRestoresZIPSharing() throws {
+    let id = try begin()
+    let root = try store.directory(id)
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("roomplan"), withIntermediateDirectories: true)
+    try roomData.write(to: root.appendingPathComponent("room.json"))
+    try roomData.write(to: root.appendingPathComponent("roomplan/live-room.json"))
+    try Data("synthetic frame log; not a capture".utf8).write(to: root.appendingPathComponent("frames.jsonl"))
+    try Data("synthetic USDZ storage fixture".utf8).write(to: root.appendingPathComponent("roomplan/room.usdz"))
+    try Data("{}".utf8).write(to: root.appendingPathComponent("roomplan/node-map.json"))
+    let report: [String: Any] = ["train_frames": 20, "validation_frames": 10, "training_camera_span_metres": 0.5]
+    let archive = try CaptureFormat.finalise(root: root, scanID: id, device: ["testFixture": true], counts: counts, report: report)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: archive.path))
+    let reopened = try ScanStore(baseURL: folder)
+    XCTAssertEqual(try reopened.latestCompleted()?["pipelineReady"] as? Bool, true)
+    XCTAssertEqual(try reopened.resultURLs(), [archive])
+    let checksums = try CaptureFormat.readJSON(root.appendingPathComponent("checksums.json"))
+    let files = checksums["files"] as! [String: Any]
+    XCTAssertNotNil(files["room.json"])
+    XCTAssertNil(files[archive.lastPathComponent])
+    XCTAssertNil(files["checksums.json"])
+  }
 }

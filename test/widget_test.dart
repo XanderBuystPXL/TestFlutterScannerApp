@@ -42,6 +42,10 @@ void main() {
             case 'shareLatestResult':
             case 'shareDiagnostics':
               return null;
+            case 'deleteAllScans':
+              status.remove('latestScan');
+              status['hasDiagnostics'] = false;
+              return null;
             default:
               throw MissingPluginException();
           }
@@ -53,12 +57,82 @@ void main() {
         .setMockMethodCallHandler(RoomPlanService.channel, null);
   });
 
-  Future<void> open(WidgetTester tester) async {
+  Future<void> open(WidgetTester tester, {bool authorise = true}) async {
+    tester.view.physicalSize = const Size(1000, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       RoomPlanTestApp(service: RoomPlanService(isIOS: true)),
     );
     await tester.pumpAndSettle();
+    if (authorise) {
+      await tester.tap(find.byType(Checkbox));
+      await tester.pumpAndSettle();
+    }
   }
+
+  testWidgets('recording needs explicit space authorisation each launch', (
+    tester,
+  ) async {
+    await open(tester, authorise: false);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byWidgetPredicate((widget) => widget is FilledButton),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(calls, ['getStatus']);
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byWidgetPredicate((widget) => widget is FilledButton),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('new package summary shows roles after restart and shares ZIP', (
+    tester,
+  ) async {
+    status['latestScan'] = {
+      ...summary(),
+      'pipelineReady': true,
+      'capture': {'train_frames': 40, 'validation_frames': 12},
+    };
+    await open(tester);
+    expect(
+      find.textContaining('40 training frames, 12 check frames'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Share scan files'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('shareLatestResult'));
+  });
+
+  testWidgets('local deletion requires confirmation and clears restored scan', (
+    tester,
+  ) async {
+    status['latestScan'] = summary();
+    status['hasDiagnostics'] = true;
+    await open(tester);
+    await tester.tap(find.text('Delete all local scans'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep scans'));
+    await tester.pumpAndSettle();
+    expect(calls, isNot(contains('deleteAllScans')));
+    await tester.tap(find.text('Delete all local scans'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete scans'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('deleteAllScans'));
+    expect(find.text('Latest saved scan'), findsNothing);
+  });
 
   testWidgets(
     'ready device offers scan and disables sharing before an attempt',

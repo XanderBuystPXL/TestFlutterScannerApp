@@ -1,40 +1,40 @@
 # Verification record
 
-Checked on Windows on 22 October 2026, using Flutter 3.35.4 / Dart 3.9.2.
+Source **0.2.0 (3)**, checked on Windows, 22 October 2026. Flutter 3.35.4 / Dart 3.9.2; Python 3.12.14, NumPy 2.3.5, Pillow 12.3.0. Independent COLMAP reader: pycolmap 4.2.1, installed only in ignored local tools.
 
-## Passed locally
+## Passed locally for the new source
 
-- Dart formatting: three files checked; no remaining formatting changes.
-- Flutter analysis: no issues found.
-- Flutter automated checks: **10 passed**, including support checks, permission denial, completion and sharing, cancellation preserving an earlier result, native errors, restoring a saved summary, a missing bridge and malformed native results.
-- Python tooling checks: **13 passed**, including matching exports, count mismatches, cancelled/empty/incomplete exports, geometry fields, omitted collections, IPA layout/device metadata and simulator selection.
-- Codemagic YAML: parsed successfully; five stages and pinned Flutter/Xcode versions confirmed.
-- Shell syntax: packaging script and all five Codemagic stages passed `bash -n`.
-- iOS property lists: parsed successfully. Camera permission text and iOS 17 deployment settings are present.
-- Team repository: no changes; HEAD remained `8d076b5` during verification.
+- Dart formatting and Flutter analysis: clean.
+- **13 Flutter tests:** recording authorisation, support checks, permission denial, completion, cancellation preserving an earlier result, native errors, restart summary/role counts, sharing, deletion confirmation, missing bridge and malformed results.
+- **33 Python tests:** old JSON checks/IPA tooling plus full synthetic package validation/preparation, timestamp/calibration/orientation rules, confidence/depth, corruption/inventory/path rejection, split isolation, train-only initialization/normalization, positive camera-Z conversion, processed/live room correction and dataset integrity. Tests also require privacy/licence assets for a full-capture IPA and reject an old app version.
+- Independent **pycolmap** read of generated binary interchange: all 30 synthetic camera poses/calibrations and 570 sensor seed points read correctly. This checks serialization, not SfM registration or real-world quality.
+- Codemagic YAML parsed with the expected five stages and pinned SDKs. All generated stage scripts and packaging script passed shell syntax checks.
+- Property lists parsed; privacy manifest is registered as a Runner resource and new Swift files are registered in Sources.
+- Team repo `3DViewerAproxx`: clean and unchanged at `8d076b5`.
 
-The Flutter tests mock the native channel. Python/native storage fixtures are synthetic and are not actual RoomPlan captures. The IPA unit tests check synthetic archive metadata; they do not prove compilation, signing or installation.
+All newly generated images/depth/geometry in automated tests are explicitly synthetic. They are not a real room, real-device acceptance, GPU training, legal approval or a successful iOS compile. Flutter tests mock the platform channel.
 
-## Original Codemagic build 0.1.0 (1)
+## Existing real-device evidence
 
-The artifacts supplied in `artifacts/TestFlutterScannerApp_1_artifacts.zip` confirm a successful simulator build, **7 native storage tests with zero failures**, and a successful iPhone release build. The shared IPA metadata identifies it as 0.1.0 (1), and its package structure passed local verification.
+The supplied files from **0.1.1 (2)** were rechecked together. Diagnostics mark the scan completed on hardware `iPhone13,3`, iOS 26.5. Counts match the JSON: **7 walls, 1 floor, 1 door, 1 window, 3 objects, 0 openings**. The exact JSON read-back event is present. Customer room files remain outside this repo.
 
-The supplied phone photo confirms that this build installed, launched, obtained camera permission and received a processed room. Its old reconstructed-room comparison rejected the export, so successful file generation on the device was not established.
+This establishes the previous RoomPlan geometry export, not RGB/depth capture or splat inputs. The old framework-identity comparison was fixed before that successful export.
 
-## Save-check fix 0.1.1 (2)
+The tracked `artifacts/RoomPlanTest-unsigned.ipa` remains original **0.1.0 (1)**. It is not replaced or relabelled as the new build.
 
-- Replaced framework-object identity comparison with direct encoded JSON validation and exact byte-for-byte disk read-back.
-- Kept wall geometry and all captured collection counts checked, with per-field errors. Omitted empty collections are accepted.
-- Added expected counts, byte counts and validation strategy to diagnostics, and a visible app version on the home screen.
-- Added **8 native regression tests** (15 total) for framework-independent JSON validation, omitted collections, specific count errors, missing geometry, malformed JSON, same-length byte changes and exact saved content.
+## New native checks awaiting Codemagic
 
-Flutter analysis, all 10 Flutter tests and all 13 Python tooling tests passed locally after this fix. The **updated 15 native tests and the new iPhone build remain pending the next Codemagic run**. The old shared IPA has deliberately not been relabelled as the fixed build.
+**22 native XCTest cases** are defined, including persistence, cancellation, interrupted recovery, JSON/count/byte checks, padded depth rows, matrix ordering, capture minima, deletion boundaries, missing-archive recovery, known SHA-256/CRC vectors and package commit/sharing. Codemagic additionally reads a Swift-written ZIP fixture with Python's independent zipfile implementation.
 
-## Awaiting the LiDAR device
+No macOS/Xcode is available locally. Thus new Swift compilation/tests and the release IPA are **pending**, not passed. The accessible Codemagic browser session redirects to sign-in; no cloud build was started from here.
 
-- Install the new 0.1.1 (2) IPA over the existing test app and confirm its version on the home screen.
-- Capture a real room and validate the exported files on Windows.
-- Exercise denied permission, cancellation, a second capture, background interruption and persistence after restarting.
-- Inspect the room's actual coverage and geometry.
+## Still required before integration
 
-Use the device acceptance checklist in `README.md`. A passing local test suite alone does not complete device acceptance.
+1. Successful latest Codemagic native tests/device build and new 0.2.0 (3) IPA.
+2. Sideload/install on LiDAR iPhone; new complete RGB/depth/RoomPlan ZIP.
+3. Physical alignment/scale/coverage review and exact exported-data checks.
+4. First actual GPU reconstruction, held-out renders/metrics and target-viewer alignment.
+5. Real-device cancellation, repeated scans, restart/sharing, interruption and deletion checks.
+6. Commercial release decisions/approvals in `docs/COMMERCIAL-USE.md`.
+
+Follow `docs/ACCEPTANCE.md`; retain actual evidence rather than replacing pending entries with assumptions.

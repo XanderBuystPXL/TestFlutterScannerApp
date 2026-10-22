@@ -1,5 +1,7 @@
 # Shared device builds
 
+**Current source is 0.2.0 (3), the full capture-pipeline test.** Build it in Codemagic and confirm the installed version before testing RGB/depth export. No new IPA has been generated locally. The old artifact below remains unchanged and must not be mistaken for the latest app.
+
 `RoomPlanTest-unsigned.ipa` is the original **0.1.0 (1)** Codemagic build. Its package metadata was checked locally. The accompanying ZIP contains build 1's Codemagic artifacts.
 
 **That IPA does not contain the JSON read-back fix in source version 0.1.1 (2).** Re-run the Codemagic workflow on the latest `main`, download the new IPA, and replace the shared IPA only after checking its version. The fixed app displays **App version: 0.1.1 (2)** on its home screen.

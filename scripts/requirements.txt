@@ -1,0 +1,3 @@
+# Desktop intake only. No Python, model weights or third-party native capture SDK in the iPhone app.
+numpy==2.3.5
+Pillow==12.3.0

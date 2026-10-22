@@ -1,0 +1,3 @@
+-r requirements.txt
+# Independent reader checks our COLMAP interchange; not bundled into the app.
+pycolmap==4.2.1

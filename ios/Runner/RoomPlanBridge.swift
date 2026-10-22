@@ -1,4 +1,5 @@
 import AVFoundation
+import ARKit
 import Flutter
 import UIKit
 #if !targetEnvironment(simulator)
@@ -36,6 +37,12 @@ final class RoomPlanBridge {
       case "startScan": self.startScan(result)
       case "shareLatestResult": self.share(diagnosticsOnly: false, result: result)
       case "shareDiagnostics": self.share(diagnosticsOnly: true, result: result)
+      case "deleteAllScans":
+        guard self.pendingResult == nil else {
+          result(FlutterError(code: "busy", message: "Finish the current scan first.", details: nil)); return
+        }
+        do { try self.requireStore().deleteAll(); result(nil) }
+        catch { result(FlutterError(code: "file_write_failed", message: error.localizedDescription, details: nil)) }
       default: result(FlutterMethodNotImplemented)
       }
     }
@@ -45,13 +52,13 @@ final class RoomPlanBridge {
     #if targetEnvironment(simulator)
     return false
     #else
-    return RoomCaptureSession.isSupported
+    return RoomCaptureSession.isSupported && ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
     #endif
   }
 
   private var supportMessage: String {
-    supported ? "RoomPlan is supported on this device."
-      : "RoomPlan needs a real LiDAR-capable iPhone or iPad. The simulator cannot scan."
+    supported ? "RoomPlan and LiDAR depth are supported on this device."
+      : "Capture needs RoomPlan and scene-depth support on a real LiDAR iPhone or iPad. The simulator cannot scan."
   }
 
   private var permission: String {
@@ -166,7 +173,11 @@ final class RoomPlanBridge {
       return
     }
     #if !targetEnvironment(simulator)
-    let controller = RoomScannerViewController()
+    let controller: RoomScannerViewController
+    do {
+      guard let id = activeID else { throw CaptureFormat.error("No scan attempt is active.") }
+      controller = try RoomScannerViewController(root: requireStore().directory(id), scanID: id)
+    } catch { fail("file_write_failed", error.localizedDescription, error); return }
     scanner = controller
     controller.modalPresentationStyle = .fullScreen
     controller.onEvent = { [weak self] event, details in
@@ -178,7 +189,7 @@ final class RoomPlanBridge {
       self.resolve(["status": "cancelled"])
     }
     controller.onFailure = { [weak self] code, message, error in self?.fail(code, message, error) }
-    controller.onRoom = { [weak self] room in self?.save(room) }
+    controller.onRoom = { [weak self] room, report in self?.save(room, captureReport: report) }
     presenter?.present(controller, animated: true)
     #else
     fail("unsupported_device", supportMessage)
@@ -186,7 +197,7 @@ final class RoomPlanBridge {
   }
 
   #if !targetEnvironment(simulator)
-  private func save(_ room: CapturedRoom) {
+  private func save(_ room: CapturedRoom, captureReport: [String: Any]) {
     guard let id = activeID else { return }
     guard !room.walls.isEmpty else {
       fail("empty_scan", "RoomPlan found no walls. Scan the walls and corners before tapping Finish.")
@@ -202,10 +213,32 @@ final class RoomPlanBridge {
       guard record("room_export_encoded", details: ["counts": counts,
         "capturedRoomIdentifier": room.identifier.uuidString, "bytes": data.count,
         "validation": "encoded_json_and_exact_readback"]) else { return }
-      let summary = try requireStore().complete(id, roomData: data, counts: counts) { exported in
-        try RoomJSONValidator.validate(exported, expectedCounts: counts)
+      guard record("package_export_started", state: "packaging", details: captureReport) else { return }
+      let store = try requireStore()
+      let root = try store.directory(id)
+      let device = deviceInfo()
+      DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        do {
+          try RoomJSONValidator.validate(data, expectedCounts: counts)
+          let roomURL = root.appendingPathComponent("room.json")
+          try data.write(to: roomURL, options: [.atomic, .completeFileProtection])
+          try RoomJSONValidator.verifyReadBack(Data(contentsOf: roomURL), matches: data)
+          try room.export(to: root.appendingPathComponent("roomplan/room.usdz"),
+            metadataURL: root.appendingPathComponent("roomplan/node-map.json"),
+            modelProvider: nil, exportOptions: .mesh)
+          for path in ["roomplan/room.usdz", "roomplan/node-map.json"] {
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete],
+              ofItemAtPath: root.appendingPathComponent(path).path)
+          }
+          _ = try CaptureFormat.finalise(root: root, scanID: id, device: device, counts: counts, report: captureReport)
+          guard let summary = try store.latestCompleted(), summary["scanId"] as? String == id else {
+            throw CaptureFormat.error("The completed package could not be reopened.")
+          }
+          DispatchQueue.main.async { self?.resolve(["status": "completed", "scan": summary]) }
+        } catch {
+          DispatchQueue.main.async { self?.fail("file_write_failed", "The scan package could not be saved: \(error.localizedDescription)", error) }
+        }
       }
-      resolve(["status": "completed", "scan": summary])
     } catch {
       fail("file_write_failed", "The room could not be saved and read back: \(error.localizedDescription)", error)
     }

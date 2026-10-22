@@ -1,4 +1,5 @@
 import json
+import gzip
 import plistlib
 import tempfile
 import unittest
@@ -91,10 +92,16 @@ class IpaValidationTests(unittest.TestCase):
             "CFBundleIdentifier": "be.aproxx.roomplanDeviceTest",
         }
 
-    def save(self, prefix="Payload/Runner.app/"):
+    def save(self, prefix="Payload/Runner.app/", controls=False):
         with zipfile.ZipFile(self.ipa, "w") as archive:
             archive.writestr(prefix + "Info.plist", plistlib.dumps(self.info))
             archive.writestr(prefix + "Runner", b"package fixture, not an actual executable")
+            if controls:
+                privacy = {"NSPrivacyTracking": False, "NSPrivacyCollectedDataTypes": [], "NSPrivacyAccessedAPITypes": [
+                    {"NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime", "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]},
+                    {"NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp", "NSPrivacyAccessedAPITypeReasons": ["C617.1"]}]}
+                archive.writestr(prefix + "PrivacyInfo.xcprivacy", plistlib.dumps(privacy))
+                archive.writestr(prefix + "Frameworks/App.framework/flutter_assets/NOTICES.Z", gzip.compress(b"Copyright synthetic notice fixture"))
 
     def test_device_package_structure_passes(self):
         self.save()
@@ -110,6 +117,20 @@ class IpaValidationTests(unittest.TestCase):
         self.save("Runner.app/")
         with self.assertRaisesRegex(ValueError, "Payload/Runner.app"):
             verify(self.ipa)
+
+    def test_capture_build_requires_privacy_and_licence_artifacts(self):
+        self.info.update(CFBundleShortVersionString="0.2.0", CFBundleVersion="3")
+        self.save()
+        with self.assertRaisesRegex(ValueError, "privacy manifest"):
+            verify(self.ipa, capture_controls=True)
+        self.save(controls=True)
+        self.assertEqual(verify(self.ipa, capture_controls=True)["CFBundleVersion"], "3")
+
+    def test_old_build_cannot_be_mislabelled_as_full_capture(self):
+        self.info.update(CFBundleShortVersionString="0.1.0", CFBundleVersion="1")
+        self.save(controls=True)
+        with self.assertRaisesRegex(ValueError, "version 0.2.0"):
+            verify(self.ipa, capture_controls=True)
 
 
 class SimulatorSelectionTests(unittest.TestCase):

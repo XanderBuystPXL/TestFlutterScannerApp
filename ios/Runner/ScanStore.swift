@@ -46,12 +46,19 @@ enum RoomJSONValidator {
 final class ScanStore {
   let baseURL: URL
   private let manager = FileManager.default
-  private let activeStates: Set<String> = ["checking", "requesting_permission", "scanning", "processing"]
+  private let activeStates: Set<String> = ["checking", "requesting_permission", "scanning", "processing", "packaging"]
 
   init(baseURL: URL? = nil) throws {
     self.baseURL = baseURL ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("RoomPlanTest", isDirectory: true)
     try manager.createDirectory(at: self.baseURL, withIntermediateDirectories: true)
+    var root = self.baseURL
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try root.setResourceValues(values)
+    #if !targetEnvironment(simulator)
+    try manager.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: root.path)
+    #endif
   }
 
   static func timestamp() -> String {
@@ -83,7 +90,7 @@ final class ScanStore {
 
   private func write(_ value: [String: Any], to url: URL) throws {
     let data = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
-    try data.write(to: url, options: .atomic)
+    try data.write(to: url, options: [.atomic, .completeFileProtection])
   }
 
   func begin(device: [String: Any], support: [String: Any], permission: String) throws -> String {
@@ -130,7 +137,7 @@ final class ScanStore {
     guard (counts["walls"] ?? 0) > 0 else { throw failure("No walls were captured. Scan more of the room and retry.") }
     try validate(roomData)
     let roomURL = try directory(id).appendingPathComponent("room.json")
-    try roomData.write(to: roomURL, options: .atomic)
+    try roomData.write(to: roomURL, options: [.atomic, .completeFileProtection])
     let savedData = try Data(contentsOf: roomURL)
     try RoomJSONValidator.verifyReadBack(savedData, matches: roomData)
     try validate(savedData)
@@ -154,7 +161,8 @@ final class ScanStore {
 
   private func summary(_ object: [String: Any]) -> [String: Any] {
     ["scanId": object["scanId"] ?? "", "completedAt": object["completedAt"] ?? "",
-     "counts": object["counts"] ?? [:]]
+     "counts": object["counts"] ?? [:], "capture": object["capture"] ?? [:],
+     "pipelineReady": object["capture"] != nil]
   }
 
   func attempts() throws -> [[String: Any]] {
@@ -167,8 +175,10 @@ final class ScanStore {
 
   func recoverInterruptedAttempts() throws {
     for object in try attempts() {
-      guard let state = object["state"] as? String, activeStates.contains(state),
-            let id = object["scanId"] as? String else { continue }
+      guard let state = object["state"] as? String, let id = object["scanId"] as? String else { continue }
+      let archive = try directory(id).appendingPathComponent("scan-\(id).zip")
+      let missingArchive = state == "completed" && object["capture"] != nil && !manager.fileExists(atPath: archive.path)
+      guard activeStates.contains(state) || missingArchive else { continue }
       try record(id, event: "previous_process_ended", state: "interrupted",
                  details: ["message": "The app closed before this attempt finished. Start a new scan."])
     }
@@ -179,6 +189,8 @@ final class ScanStore {
       guard let id = object["scanId"] as? String,
             let room = try? read(directory(id).appendingPathComponent("room.json")),
             let walls = room["walls"] as? [Any], !walls.isEmpty else { continue }
+      let archive = try directory(id).appendingPathComponent("scan-\(id).zip")
+      if object["capture"] != nil && !manager.fileExists(atPath: archive.path) { continue }
       return summary(object)
     }
     return nil
@@ -190,6 +202,9 @@ final class ScanStore {
     guard let scan = try latestCompleted(), let id = scan["scanId"] as? String else {
       throw failure("No completed scan is available. Finish a room scan first.")
     }
+    if scan["pipelineReady"] as? Bool == true {
+      return [try directory(id).appendingPathComponent("scan-\(id).zip")]
+    }
     return [try directory(id).appendingPathComponent("room.json"), try diagnosticsURL(id)]
   }
 
@@ -198,5 +213,12 @@ final class ScanStore {
       throw failure("No diagnostic log is available. Start a scan attempt first.")
     }
     return try diagnosticsURL(id)
+  }
+
+  func deleteAll() throws {
+    for url in try manager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
+      guard UUID(uuidString: url.lastPathComponent) != nil else { continue }
+      try manager.removeItem(at: url)
+    }
   }
 }

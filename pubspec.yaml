@@ -1,7 +1,7 @@
 name: roomplan_device_test
-description: Standalone RoomPlan capture and JSON export test for a real LiDAR iPhone.
+description: Standalone RoomPlan RGB, LiDAR and geometry capture for reconstruction testing.
 publish_to: none
-version: 0.1.1+2
+version: 0.2.0+3
 
 environment:
   sdk: ^3.9.2

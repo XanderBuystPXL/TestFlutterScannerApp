@@ -36,6 +36,7 @@ class _ScanTestPageState extends State<ScanTestPage>
     with WidgetsBindingObserver {
   RoomPlanStatus? _status;
   bool _busy = true;
+  bool _authorised = false;
   String _message = 'Checking this device…';
   String? _error;
 
@@ -78,7 +79,7 @@ class _ScanTestPageState extends State<ScanTestPage>
         _message = status.latestScan != null
             ? 'Your latest completed scan is saved on this iPhone.'
             : status.supported
-            ? 'Ready. Scan a small room, then tap Finish.'
+            ? 'Ready. Capture the room, record a check pass, then Finish.'
             : status.supportMessage;
         _error = null;
         _busy = false;
@@ -93,6 +94,7 @@ class _ScanTestPageState extends State<ScanTestPage>
   }
 
   Future<void> _scan() async {
+    if (!_authorised) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -143,12 +145,59 @@ class _ScanTestPageState extends State<ScanTestPage>
     }
   }
 
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete all local scans?'),
+        content: const Text(
+          'This removes completed and unfinished captures, photos, depth and logs from this app. Copies already shared must be deleted separately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep scans'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete scans'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await widget.service.deleteAllScans();
+      await _loadStatus();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = _errorMessage(error);
+          _busy = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = _status;
     final scan = status?.latestScan;
     return Scaffold(
-      appBar: AppBar(title: const Text('RoomPlan device test')),
+      appBar: AppBar(
+        title: const Text('RoomPlan device test'),
+        actions: [
+          IconButton(
+            tooltip: 'Open source licences',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => showLicensePage(
+              context: context,
+              applicationName: 'RoomPlan device test',
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -165,12 +214,12 @@ class _ScanTestPageState extends State<ScanTestPage>
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'One room. One test.',
+                    'Capture a room for reconstruction.',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Check that RoomPlan can scan a room and save its geometry as a JSON file.',
+                    'Walk slowly around the room with overlapping views of walls, floor and furniture. Then record a separate check pass. Avoid people, screens and private documents.',
                   ),
                   const SizedBox(height: 24),
                   if (_busy) const LinearProgressIndicator(),
@@ -199,8 +248,23 @@ class _ScanTestPageState extends State<ScanTestPage>
                       Text('Latest attempt: ${status.latestAttemptState}'),
                   ],
                   const SizedBox(height: 24),
+                  CheckboxListTile(
+                    value: _authorised,
+                    onChanged: _busy
+                        ? null
+                        : (value) =>
+                              setState(() => _authorised = value ?? false),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'I am authorised to record this space and its contents.',
+                    ),
+                    subtitle: const Text(
+                      'Saves interior photos, LiDAR depth and room geometry on this device. Nothing uploads automatically. Sharing sends the full unredacted capture to your chosen destination.',
+                    ),
+                  ),
                   FilledButton.icon(
-                    onPressed: !_busy && status?.supported == true
+                    onPressed:
+                        !_busy && _authorised && status?.supported == true
                         ? _scan
                         : null,
                     icon: const Icon(Icons.camera_alt_outlined),
@@ -224,6 +288,12 @@ class _ScanTestPageState extends State<ScanTestPage>
                     onPressed: _busy ? null : _loadStatus,
                     child: const Text('Refresh device status'),
                   ),
+                  TextButton(
+                    onPressed: !_busy && status?.hasDiagnostics == true
+                        ? _delete
+                        : null,
+                    child: const Text('Delete all local scans'),
+                  ),
                   if (scan != null) ...[
                     const Divider(height: 36),
                     Text(
@@ -240,10 +310,16 @@ class _ScanTestPageState extends State<ScanTestPage>
                     const SizedBox(height: 8),
                     Text('Saved ${scan.completedAt.toLocal()}'),
                     SelectableText('Scan ID: ${scan.scanId}'),
+                    const SizedBox(height: 8),
+                    Text(
+                      scan.pipelineReady
+                          ? 'Capture ZIP: ${scan.capture['train_frames']} training frames, ${scan.capture['validation_frames']} check frames. Reconstruction quality still needs verification.'
+                          : 'Older geometry-only scan. Record a new scan to capture photos and depth for reconstruction.',
+                    ),
                   ],
                   const SizedBox(height: 24),
                   const Text(
-                    'This test saves room geometry and logs. It does not save photographs, depth maps or a photorealistic model.',
+                    'Keep the app open while scanning and saving. Share scan files exports one ZIP with photos, camera calibration, depth, room geometry and diagnostics. Reconstruction runs separately. Delete local captures when they are no longer needed.',
                   ),
                 ],
               ),

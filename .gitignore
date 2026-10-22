@@ -21,3 +21,15 @@ coverage/
 .env
 __pycache__/
 *.pyc
+# Real room captures contain private images and must not be committed.
+captures/
+datasets/
+*.scan.zip
+scan-*.zip
+**/rgb/
+**/depth/
+**/confidence/
+**/room.json
+**/diagnostics.json
+*.f32
+*.u8

@@ -25,7 +25,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>RoomPlan Test uses the camera and LiDAR to scan a room and save its geometry on this device.</string>
+	<string>Record interior photos, LiDAR depth and room geometry on this device for 3D reconstruction. Files are shared only when you choose Share.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
