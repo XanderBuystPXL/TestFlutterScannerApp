@@ -12,7 +12,7 @@ Source **0.2.0 (3)**, checked on Windows, 22 October 2026. Flutter 3.35.4 / Dart
 - Property lists parsed; privacy manifest is registered as a Runner resource and new Swift files are registered in Sources.
 - Team repo `3DViewerAproxx`: clean and unchanged at `8d076b5`.
 
-All newly generated images/depth/geometry in automated tests are explicitly synthetic. They are not a real room, real-device acceptance, GPU training, legal approval or a successful iOS compile. Flutter tests mock the platform channel.
+All newly generated images/depth/geometry in automated tests are explicitly synthetic. They are not a real room, real-device acceptance, GPU training or legal approval. Local checks do not compile iOS; Flutter tests mock the platform channel.
 
 ## Existing real-device evidence
 
@@ -22,15 +22,17 @@ This establishes the previous RoomPlan geometry export, not RGB/depth capture or
 
 The tracked `artifacts/RoomPlanTest-unsigned.ipa` remains original **0.1.0 (1)**. It is not replaced or relabelled as the new build.
 
-## New native checks awaiting Codemagic
+## Codemagic native evidence and simulator-lifecycle fix
 
-**22 native XCTest cases** are defined, including persistence, cancellation, interrupted recovery, JSON/count/byte checks, padded depth rows, matrix ordering, capture minima, deletion boundaries, missing-archive recovery, known SHA-256/CRC vectors and package commit/sharing. Codemagic additionally reads a Swift-written ZIP fixture with Python's independent zipfile implementation.
+The build log supplied on 22 October 2026 confirms **22 native XCTest cases passed, zero failures**, on an iOS 18.5 simulator with Xcode 16.4. This includes simulator compilation, storage, cancellation/recovery, JSON/count/byte checks, padded depth rows, matrix ordering, capture minima, deletion, missing-archive recovery, SHA-256/CRC vectors and package commit/sharing.
 
-No macOS/Xcode is available locally. Thus new Swift compilation/tests and the release IPA are **pending**, not passed. The accessible Codemagic browser session redirects to sign-in; no cloud build was started from here.
+After `TEST SUCCEEDED`, `simctl get_app_container` failed with CoreSimulator error 405, `Unable to lookup in current state: Shutdown`; the stage exited 149 before independent ZIP verification/device compilation. The workflow now explicitly boots/waits for the selected simulator before tests and again before container lookup. No errors are ignored and the ZIP check remains required. The corrected YAML and shell syntax were checked locally; the cloud rerun is pending.
+
+Simulator success does not compile the RoomPlan-only device branches. The iPhone release compile, IPA, independent reading of the native ZIP, and actual capture remain **pending**. No macOS/Xcode is available locally; the accessible browser session requires Codemagic sign-in.
 
 ## Still required before integration
 
-1. Successful latest Codemagic native tests/device build and new 0.2.0 (3) IPA.
+1. Successful corrected Codemagic workflow through ZIP verification, device build and new 0.2.0 (3) IPA.
 2. Sideload/install on LiDAR iPhone; new complete RGB/depth/RoomPlan ZIP.
 3. Physical alignment/scale/coverage review and exact exported-data checks.
 4. First actual GPU reconstruction, held-out renders/metrics and target-viewer alignment.

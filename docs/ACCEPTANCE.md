@@ -5,7 +5,7 @@ Record source commit, Codemagic build ID, app version, device/iOS, scan UUID, ZI
 ## Current evidence
 
 - Geometry-only 0.1.1 (2): real room JSON and matching completed diagnostics supplied/checked on 22 October 2026.
-- Full capture 0.2.0 (3): code/synthetic checks available; new Codemagic compilation/native tests, install/capture, physical alignment and first reconstruction are **pending**.
+- Full capture 0.2.0 (3): simulator compilation and all 22 native tests passed in the supplied Codemagic log. A post-test simulator shutdown blocked fixture retrieval; the workflow correction, independent ZIP verification and device release build need a rerun. Install/capture, physical alignment and first reconstruction remain **pending**.
 - Repeated capture, cancellation/restart/sharing/deletion on the new build: **pending**.
 - Commercial product release: **pending** the decisions in COMMERCIAL-USE.md.
 

@@ -36,6 +36,8 @@ workflows:
           mkdir -p build/test-results
           flutter build ios --simulator --debug --no-codesign --no-pub 2>&1 | tee build/test-results/simulator-build.log
           DEVICE_ID=$(xcrun simctl list devices available --json | python3 scripts/select_simulator.py)
+          # Own the simulator lifecycle rather than relying on xcodebuild's temporary boot.
+          xcrun simctl bootstatus "$DEVICE_ID" -b 2>&1 | tee build/test-results/simulator-boot.log
           xcodebuild test \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
@@ -44,6 +46,8 @@ workflows:
             -parallel-testing-enabled NO \
             -resultBundlePath build/test-results/RunnerTests.xcresult \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/test-results/native-tests.log
+          # Xcode can shut down the destination after successful tests. Reboot and wait before lookup.
+          xcrun simctl bootstatus "$DEVICE_ID" -b 2>&1 | tee build/test-results/simulator-post-test-boot.log
           APP_DATA=$(xcrun simctl get_app_container "$DEVICE_ID" be.aproxx.roomplanDeviceTest data)
           cp "$APP_DATA/Documents/zip-writer-fixture.zip" build/test-results/native-zip-fixture.zip
           build/intake-venv/bin/python scripts/verify_native_zip.py build/test-results/native-zip-fixture.zip
