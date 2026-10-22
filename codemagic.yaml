@@ -50,7 +50,7 @@ workflows:
           xcrun simctl bootstatus "$DEVICE_ID" -b 2>&1 | tee build/test-results/simulator-post-test-boot.log
           APP_DATA=$(xcrun simctl get_app_container "$DEVICE_ID" be.aproxx.roomplanDeviceTest data)
           cp "$APP_DATA/Documents/zip-writer-fixture.zip" build/test-results/native-zip-fixture.zip
-          build/intake-venv/bin/python scripts/verify_native_zip.py build/test-results/native-zip-fixture.zip
+          build/intake-venv/bin/python scripts/verify_native_zip.py build/test-results/native-zip-fixture.zip 2>&1 | tee build/test-results/native-zip-verification.log
       - name: Compile unsigned iPhone release
         script: |
           set -euo pipefail
