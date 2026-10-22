@@ -96,7 +96,7 @@ The validator checks JSON readability, the completed state and scan ID, the succ
 
 Use this checklist for device acceptance:
 
-- [ ] Codemagic's native tests and release build succeed and the IPA downloads.
+- [x] Codemagic's native tests and release build succeed and the IPA downloads.
 - [ ] Sideloadly installs the app and it launches independently.
 - [ ] A real room produces non-empty geometry and both exports pass validation on Windows.
 - [ ] Cancel a new scan; the previous successful scan remains shareable.
