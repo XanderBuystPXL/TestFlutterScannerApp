@@ -5,14 +5,22 @@ Current source **0.3.0 (5)**, checked on Windows, 23 October 2026. Earlier 0.2.1
 ## Current 0.3.0 verification
 
 - Flutter analysis and formatting clean; **18 widget/service tests pass**, including restart/share of continuous captures with warnings and explicit unverified-reconstruction wording.
-- **53 Python tests pass**, including schema-2 captures/warnings, legacy compatibility, explicit all-frame trials without source mutation, automatic holdout/seed isolation, rejection of isolated held-out views, and null rather than fabricated all-fit scores.
-- **37 native XCTest cases are defined**, nine additions for motion filtering, JSON metadata/checksums and stationary/translated viewpoints, late/new/unseen geometry, floor detection, depth confidence/occlusion, active coaching/tracking, continuous report requirements and shareable warning-package storage. They require Codemagic; no local Xcode is available. All eight Swift files pass the local syntax parser; this is not type-checking.
-- Versioned continuous captures, bounded subsampled depth guidance and source registration were checked locally. Codemagic config/stage/package scripts and property-list/source registrations are checked; new IPA/device execution remain pending.
+- **57 Python tests pass**, including schema-2 captures/warnings, legacy compatibility, explicit all-frame trials without source mutation, automatic holdout/seed isolation, rejection of isolated held-out views, null rather than fabricated all-fit scores, and four Xcode project/resource graph regressions.
+- **37 native XCTest cases are defined**, nine additions for motion filtering, JSON metadata/checksums and stationary/translated viewpoints, late/new/unseen geometry, floor detection, depth confidence/occlusion, active coaching/tracking, continuous report requirements and shareable warning-package storage. The supplied build-7 screenshot shows the cloud native-test stage succeeded; detailed results/counts were not supplied. No local Xcode is available. All eight Swift files pass the local syntax parser; this is not type-checking.
+- Versioned continuous captures and bounded subsampled depth guidance were checked locally. The corrected Xcode graph has 68 unique object IDs and resolves both the application privacy resource and guidance source. Codemagic YAML and all five generated stage scripts plus the packaging script pass local checks; corrected IPA/device execution remain pending.
 - The original real 0.2.1 ZIP remains unchanged. A new private **85-frame** fit completes 3,000 actual CUDA training steps and exports **889,641 Gaussians**. Independent PLY read finds all 59 fields finite. Fitted and 15cm-shifted-camera renders were inspected; furniture/detail artifacts remain. No held-out scores are claimed.
 - Offline sensor/geometry replay suggests the full ordinary walkthrough clears the initial observed-wall/floor coverage rule, while its original 22-frame training subset fails. This does not run or validate the live Swift guidance on an iPhone.
 - The Windows reconstruction helper resolves the moved read-only research runtime and passes actual-dataset preflight without editing it. Raw/derived room data and previews remain ignored. `3DViewerAproxx` is unchanged.
 
-[Guided capture implementation, reproduction and trial limits](docs/GUIDED-CAPTURE.md). **Next gate: Codemagic compilation/tests and real-device acceptance of 0.3.0, followed by target-viewer/full-room quality review.** Earlier requests for an end-user separate training/check walk are superseded by continuous capture; separate evaluation remains a development operation.
+[Guided capture implementation, reproduction and trial limits](docs/GUIDED-CAPTURE.md). **Next gate: a successful corrected Codemagic packaging run and real-device acceptance of 0.3.0.** Further reconstruction work is parked; target-viewer/full-room quality remains a later acceptance item. Earlier requests for an end-user separate training/check walk are superseded by continuous capture; separate evaluation remains a development operation.
+
+## Codemagic build 7 privacy-manifest packaging fix
+
+The supplied screenshot for commit `7e0175a` shows the simulator/native-test and unsigned iPhone release stages succeeded, then packaging failed with `Missing application privacy manifest`. The screenshot does not include individual XCTest results or their count. This establishes the cloud stages ran successfully for that commit, but not a valid final IPA.
+
+Source inspection found two duplicate Xcode object IDs: `CaptureGuidance.swift` reused the privacy manifest's build-file and file-reference IDs. The guidance entries now use distinct IDs; `PrivacyInfo.xcprivacy` remains in Runner's Resources phase. Privacy declarations and final IPA validation are unchanged.
+
+An early CI guard checks duplicate IDs and resolves Runner's resource/source graph. Four regressions cover the original collision, missing privacy-resource membership, wrong guidance-source reference and the corrected graph. Packaging also checks and lints the manifest inside the compiled app before creating the IPA. All 57 Python tests and six shell-script syntax checks pass on Windows. A corrected cloud build is still required to confirm actual resource copying and final IPA validation; no local Xcode is available.
 
 ## Historical 0.2.1 local verification
 

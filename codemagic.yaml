@@ -18,6 +18,8 @@ workflows:
       - name: Analyze and test Flutter
         script: |
           set -euo pipefail
+          mkdir -p build/test-results
+          python3 scripts/check_xcode_project.py ios/Runner.xcodeproj/project.pbxproj 2>&1 | tee build/test-results/xcode-project-check.log
           dart format --output=none --set-exit-if-changed lib test
           flutter analyze --no-pub
           flutter test --no-pub --reporter expanded

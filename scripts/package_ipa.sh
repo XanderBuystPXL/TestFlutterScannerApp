@@ -8,6 +8,11 @@ app="$PWD/build/ios/iphoneos/Runner.app"
 output="$PWD/build/ipa/RoomPlanTest-unsigned.ipa"
 test -f "$app/Runner"
 plutil -lint "$app/Info.plist"
+if [ ! -f "$app/PrivacyInfo.xcprivacy" ]; then
+  echo 'Runner.app is missing PrivacyInfo.xcprivacy. Check Runner resource membership and unique Xcode object IDs.' >&2
+  exit 1
+fi
+plutil -lint "$app/PrivacyInfo.xcprivacy"
 case "$(lipo -archs "$app/Runner")" in
   *arm64*) ;;
   *) echo 'Expected an arm64 iPhone executable.' >&2; exit 1 ;;
