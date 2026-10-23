@@ -7,7 +7,9 @@ import plistlib
 from pathlib import Path
 import struct
 import tempfile
+import sys
 import unittest
+from unittest.mock import patch
 import uuid
 import zipfile
 
@@ -17,7 +19,7 @@ from PIL import Image
 from capture_pipeline import (BASIS, Package, backproject, prepare, quaternion, room_alignment, safe_path,
                               validate, verify_dataset, write_json)
 from capture_scene import scene_arrays
-from run_poc import preflight
+from run_poc import preflight, no_holdout_evaluation, main as run_poc_main
 
 
 def fixture(root):
@@ -93,6 +95,104 @@ class CaptureTests(unittest.TestCase):
         fn(self.frames)
         (self.root / "frames.jsonl").write_text("".join(json.dumps(f)+"\n" for f in self.frames), encoding="utf-8")
         rehash(self.root)
+
+    def continuous(self, passed=True):
+        for i, f in enumerate(self.frames):
+            f['role'] = f['segment_id'] = 'capture'
+            f['camera_to_world'][0][3] = i*.03
+        (self.root / 'frames.jsonl').write_text(''.join(json.dumps(f)+'\n' for f in self.frames))
+        manifest = json.loads((self.root / 'manifest.json').read_text())
+        report = manifest['capture']
+        report.update(capture_mode='continuous_guided', capture_frames=30, train_frames=30, validation_frames=0,
+                      training_camera_span_metres=.87)
+        report['guidance'] = {'algorithm':'observed_surface_depth_agreement_v1', 'saved_frames':30,
+            'camera_span_metres':.87, 'coverage_passed':passed, 'reconstruction_verified':False,
+            'surfaces':[{'id':str(i),'kind':'floor' if i==3 else 'wall','threshold':.2 if i==3 else .4,
+                         'multi_view_fraction':.8 if passed else 0.} for i in range(4)]}
+        manifest.update(schema_version=2, validation_protocol='continuous_capture_no_user_selected_holdout',
+                        quality_status='estimated_surface_coverage_passed_reconstruction_unverified' if passed else 'needs_more_views_reconstruction_unverified')
+        write_json(self.root/'manifest.json',manifest)
+        diag=json.loads((self.root/'diagnostics.json').read_text())
+        diag['capture']=report
+        write_json(self.root/'diagnostics.json',diag)
+        rehash(self.root)
+
+    def test_continuous_capture_defaults_to_all_frames_and_retains_source_roles(self):
+        self.continuous()
+        self.assertEqual(self.check()[0]['schema_version'],2)
+        out=prepare(self.root,Path(self.tmp.name)/'all')
+        result=preflight(out,2)
+        self.assertEqual((result['training_views'],result['check_views']),(30,0))
+        self.assertFalse(result['heldout_metrics_available'])
+        self.assertTrue(all(f['source_role']=='capture' for f in verify_dataset(out)['frames']))
+
+    def test_legacy_all_frame_trial_does_not_modify_original_split_or_package(self):
+        before=(self.root/'frames.jsonl').read_bytes()
+        out=prepare(self.root,Path(self.tmp.name)/'all',mode='all-frames')
+        self.assertEqual((preflight(out,2)['training_views'],preflight(out,2)['check_views']),(30,0))
+        self.assertEqual((self.root/'frames.jsonl').read_bytes(),before)
+        self.assertEqual(sum(f['source_role']=='validation' for f in verify_dataset(out)['frames']),10)
+        self.assertEqual(len(list((out/'holdout_depth').glob('*.npz'))),0)
+
+    def test_automatic_holdout_stays_out_of_depth_fitting(self):
+        self.continuous()
+        out=prepare(self.root,Path(self.tmp.name)/'automatic',mode='automatic-holdout')
+        self.assertEqual((preflight(out,2)['training_views'],preflight(out,2)['check_views']),(20,10))
+        self.assertTrue(preflight(out,2)['heldout_metrics_available'])
+        self.assertEqual(len(list((out/'holdout_depth').glob('*.npz'))),10)
+        cfg=verify_dataset(out)
+        report=json.loads((out/'sensor_depth/report.json').read_text())
+        self.assertEqual({v['index'] for v in report['views']},{i for i,f in enumerate(cfg['frames']) if f['role']=='train'})
+
+    def test_continuous_capture_can_preserve_warnings_without_claiming_ready(self):
+        self.continuous(passed=False)
+        self.check()
+        out=prepare(self.root,Path(self.tmp.name)/'warning')
+        self.assertTrue(preflight(out,2)['coverage_warning'])
+        with patch.object(sys,'argv',['run_poc.py',str(out),'--poc-root','unused','--out',str(out.parent/'run'),'--alignment-reviewed']):
+            with self.assertRaisesRegex(ValueError,'Capture carries'):
+                run_poc_main()
+
+    def test_continuous_false_coverage_pass_is_rejected(self):
+        self.continuous(passed=False)
+        manifest=json.loads((self.root/'manifest.json').read_text())
+        manifest['capture']['guidance']['coverage_passed']=True
+        write_json(self.root/'manifest.json',manifest)
+        diag=json.loads((self.root/'diagnostics.json').read_text()); diag['capture']=manifest['capture']
+        write_json(self.root/'diagnostics.json',diag); rehash(self.root)
+        with self.assertRaisesRegex(ValueError,'Coverage pass flag'):
+            self.check()
+
+    def test_continuous_roles_cannot_mix_with_legacy_split(self):
+        self.continuous()
+        self.mutate_frame(lambda frames: frames[0].update(role='train',segment_id='train'))
+        with self.assertRaisesRegex(ValueError,'Invalid capture role'):
+            self.check()
+
+    def test_image_quality_warning_survives_intake_even_with_surface_coverage_pass(self):
+        self.continuous()
+        manifest=json.loads((self.root/'manifest.json').read_text())
+        manifest['capture']['image_quality_warning_at_finish']='Increase room lighting'
+        write_json(self.root/'manifest.json',manifest)
+        diag=json.loads((self.root/'diagnostics.json').read_text()); diag['capture']=manifest['capture']
+        write_json(self.root/'diagnostics.json',diag); rehash(self.root)
+        out=prepare(self.root,Path(self.tmp.name)/'image-warning')
+        self.assertTrue(preflight(out,2)['coverage_warning'])
+
+    def test_automatic_holdout_rejects_isolated_views(self):
+        from capture_pipeline import fitting_frames
+        isolated=[dict(f,camera_to_world=np.eye(4).tolist()) for f in self.frames]
+        for i,f in enumerate(isolated): f['camera_to_world'][0][3]=i*2.
+        with self.assertRaisesRegex(ValueError,'Insufficient nearby views'):
+            fitting_frames(isolated,'automatic-holdout')
+
+    def test_all_frame_evaluation_emits_no_fake_or_training_view_metrics(self):
+        out=Path(self.tmp.name)/'fit'
+        result=no_holdout_evaluation(None,None,out,100,0,False)
+        self.assertIsNone(result['mean_psnr'])
+        self.assertEqual(result['views'],[])
+        self.assertIn('not_evaluated',result['status'])
+        self.assertEqual(json.loads((out/'eval/step-000100/metrics.json').read_text()),result)
 
     def test_full_synthetic_package_and_zip_pass(self):
         self.assertEqual(len(self.check()[1]), 30)

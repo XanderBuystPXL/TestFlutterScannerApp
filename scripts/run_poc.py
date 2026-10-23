@@ -28,7 +28,20 @@ def preflight(data, factor):
             require(item["mask"].shape == item["depth"].shape and
                     np.isfinite(item["depth"]).all(), "Invalid normalized depth.")
     return {"training_views": len(train), "check_views": len(val), "normalization": config["normalization"],
-            "source_scan_id": config["source_scan_id"], "roles_disjoint": not set(train).intersection(val)}
+            "source_scan_id": config["source_scan_id"], "roles_disjoint": not set(train).intersection(val),
+            "protocol": config["validation_protocol"], "heldout_metrics_available": bool(val),
+            "coverage_assessment": "not_recorded" if config.get("source_coverage") is None else "recorded",
+            "coverage_warning": bool(config.get("source_capture_warning")) or (config.get("source_coverage") is not None and not config["source_coverage"]["coverage_passed"])}
+
+
+def no_holdout_evaluation(params, scene, out, step, degree, antialiased, **kwargs):
+    """No fabricated scores or training-view scores presented as held-out results."""
+    report = {"step": step, "status": "not_evaluated_all_frames_used_for_fitting", "views": [],
+              "mean_psnr": None, "mean_ssim": None, "note": "No held-out views exist in this all-frame fit."}
+    folder = Path(out) / "eval" / f"step-{step:06d}"
+    folder.mkdir(parents=True, exist_ok=True)
+    write_json(folder / "metrics.json", report)
+    return report
 
 
 def main():
@@ -39,6 +52,7 @@ def main():
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--factor", type=int, default=2)
     p.add_argument("--check-only", action="store_true")
+    p.add_argument("--allow-coverage-warnings", action="store_true", help="Explicitly run a diagnostic reconstruction from a capture marked as needing more views.")
     p.add_argument("--alignment-reviewed", action="store_true", help="Confirm physical RGB/depth, camera path and RoomPlan alignment were reviewed.")
     args = p.parse_args()
     result = preflight(args.data, args.factor)
@@ -47,6 +61,8 @@ def main():
         return
     require(args.poc_root is not None and args.out is not None, "Supply --poc-root and --out for GPU training.")
     require(args.alignment_reviewed, "Review alignment PNGs, preview.ply and RoomPlan geometry first; see docs/ACCEPTANCE.md.")
+    require(not result["coverage_warning"] or args.allow_coverage_warnings,
+            "Capture carries coverage or capture-condition warnings. Use --allow-coverage-warnings only for an explicitly labelled diagnostic trial.")
     alignment = json_bytes((Path(args.data) / "geometry" / "alignment.json").read_bytes())
     require(alignment["status"] == "matched_geometry_requires_physical_review",
             "RoomPlan/live geometry did not yield a consistent alignment. Resolve this before the full-pipeline test.")
@@ -57,15 +73,18 @@ def main():
     # Scoped to this Python process. The Android/SfM loader would recreate an interleaved
     # split and leak the separately recorded validation pass into training.
     trainer.Scene = CaptureScene
+    if not result["heldout_metrics_available"]:
+        trainer.evaluate = no_holdout_evaluation
     trainer.train(args.data, args.out, steps=args.steps, factor=args.factor,
                   eval_every=max(1, args.steps//3), save_every=max(1, args.steps//3),
                   depth_dir=Path(args.data) / "sensor_depth")
-    result["protocol"] = "withheld RGB/depth; shared ARKit/RoomPlan mapping; not independent localization"
+    result["coverage_warning_override"] = args.allow_coverage_warnings
     result["alignment_reviewed_by_operator"] = True
     result["trainer_source_sha256"] = hashlib.sha256(Path(trainer.__file__).read_bytes()).hexdigest()
     result["adapter_source_sha256"] = hashlib.sha256(Path(__file__).with_name("capture_scene.py").read_bytes()).hexdigest()
     write_json(args.out / "iphone-intake.json", result)
-    print("Training complete. Review held-out renders/metrics; this alone does not prove full-room coverage.")
+    print("Training complete. Review the splat in the target viewer. " +
+          ("Held-out metrics are available." if result["heldout_metrics_available"] else "All frames were fitted; no held-out quality score is available."))
 
 
 if __name__ == "__main__":

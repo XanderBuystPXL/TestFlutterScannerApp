@@ -1,10 +1,10 @@
 # RoomPlan capture pipeline test
 
-Standalone Flutter/Swift app for **cloud build → Windows install → LiDAR capture → checked reconstruction dataset**. Source version **0.2.1 (4)**. The Aproxx team app is untouched.
+Standalone Flutter/Swift app for **cloud build → Windows install → LiDAR capture → checked reconstruction dataset**. Source version **0.3.0 (5)**. The Aproxx team app is untouched.
 
 Captures one room using public Apple APIs: RGB photos, per-frame camera poses/intrinsics, synchronized scene depth/confidence, complete RoomPlan JSON, USDZ, node metadata, live geometry for alignment, events and checksums. Shares one ZIP. Desktop tools validate it and prepare inputs for the existing Gaussian-splat research pipeline.
 
-**This version is implemented, not yet proven on the iPhone.** The previous geometry-only version produced a real room JSON successfully. The new capture, Codemagic build, installation, alignment and first reconstruction need [device acceptance](docs/ACCEPTANCE.md). Structural tests cannot prove physical calibration or reconstruction quality.
+**Guided capture 0.3.0 needs a new Codemagic build and device acceptance.** The supplied 0.2.1 package passed RGB/depth/geometry intake, and an all-85-frame reconstruction trial now produces a splat. This does not establish final room quality or validate the new guidance on a phone. See [VALIDATION.md](VALIDATION.md).
 
 ## Build and install
 
@@ -12,7 +12,7 @@ Captures one room using public Apple APIs: RGB photos, per-frame camera poses/in
 2. Start a build. No signing credentials or App Store Connect account are needed for the unsigned workflow. Download the new `RoomPlanTest-unsigned.ipa` after all checks pass.
 3. On the Windows PC connected to the phone, install [Sideloadly](https://sideloadly.io/), follow its current Apple device-component setup, and connect the unlocked iPhone by USB. Accept Trust this computer.
 4. Select the IPA in Sideloadly, sign with your Apple account, complete verification and install. Trust the developer profile and enable Developer Mode when prompted. The device owner must approve phone security prompts; this does not bypass Face ID/passcode restrictions.
-5. Confirm **App version: 0.2.1 (4)**. For updates, use the same signing account/bundle identifier and install over the app to retain captures. Free provisioning normally needs refreshing after seven days; see [Sideloadly's FAQ](https://sideloadly.io/faq).
+5. Confirm **App version: 0.3.0 (5)**. For updates, use the same signing account/bundle identifier and install over the app to retain captures. Free provisioning normally needs refreshing after seven days; see [Sideloadly's FAQ](https://sideloadly.io/faq).
 
 ### Recover the failed 0.2.0 capture
 
@@ -30,8 +30,8 @@ Codemagic pins Flutter **3.35.4**, revision `d693b4b9dbac2acd4477aea4555ca6dcbea
 
 1. Obtain permission to record the space and its contents. Remove people/private documents/screens. Confirm the recording authorisation checkbox and tap **Start scan**. Allow camera access.
 2. Walk slowly around a small, well-lit room. Keep overlapping views; move through the space rather than rotating in one spot. Cover walls/corners, floor, furniture and intended walkthrough areas. Photos save automatically, targeting three per second.
-3. After covering the room, tap **Record check pass**. Walk a separate short route with different viewpoints. Its RGB/depth are withheld from fitting/initialization by the adapter; ARKit and RoomPlan mapping are still shared.
-4. After at least ten check frames, tap **Finish**. Keep the app open and phone unlocked while saving. Completion requires processed room geometry, 20 training frames, ten check frames, camera movement, saved files and ZIP. These are sanity minima, not sufficient coverage targets.
+3. Follow the coverage map: cyan is your position, green samples have depth-confirmed views from different positions, and orange samples need more views. Prompts identify a wall or floor needing attention. The estimate covers detected walls/floor; also inspect furniture and intended walkthrough paths yourself.
+4. One **Start scan** starts RoomPlan, LiDAR depth and the RGB/camera recording together. Tap **Finish** to save them in one package. If a coverage warning appears, choose **Keep scanning** or explicitly **Save with warning**. The latter preserves files and a visible warning; it never verifies reconstruction. At least 30 saved views and some translation are required to save; frame counts are not coverage proof. All usable views remain available to reconstruction. There is no user-facing training/check-pass choice.
 5. **Share scan files** transfers the full unredacted ZIP to your chosen Windows destination. **Share diagnostics** exports only the latest attempt's JSON log.
 6. Reopen and try sharing again. Previous completed scans survive failed/cancelled attempts. **Delete all local scans** removes complete/partial captures; shared/desktop copies need separate deletion.
 
@@ -68,6 +68,20 @@ Preparation produces:
 
 Review overlays, contact sheet and point clouds before training. Open PLYs together in an approved viewer. Check upright orientation, distances, depth edges, camera positions, wall placement and drift. Follow [ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
+## Fitting and development evaluation modes
+
+- New schema-2 continuous captures default to **all frames** for reconstruction. Old schema-1 captures default to their original separate-pass split.
+- `prepare ... --mode all-frames` creates a production-style fit from either format, including the old check pass. Source ZIP/roles remain byte-for-byte intact in evidence. No held-out metrics are produced for this fit.
+- `prepare ... --mode automatic-holdout` automatically withholds nearby overlapping views across the route for development tests. Check RGB/depth stay out of fitting and seed points. These temporally correlated views share ARKit mapping and do not establish independent localization or full-room generalization.
+- `prepare ... --mode preserve-split` retains an old schema-1 benchmark exactly. A guided capture has no original split to preserve.
+
+```powershell
+python scripts/capture_pipeline.py prepare "captures/scan-UUID.zip" "datasets/room-all" --mode all-frames
+python scripts/run_poc.py "datasets/room-all" --check-only
+```
+
+The original supplied scan is prepared privately at `datasets/room-80F3900A-all-frames`; its 3,000-step CUDA trial is at `datasets/room-80F3900A-all-frames-run/point_cloud.ply`. Neither is committed. A capture with recorded coverage/image warnings requires an explicit `--allow-coverage-warnings` for diagnostic training; the warning is retained in provenance.
+
 ## Existing GPU reconstruction
 
 In the existing CUDA PoC environment, use this wrapper rather than the Android/SfM loader directly:
@@ -80,7 +94,7 @@ python scripts\run_poc.py "datasets\room-01" --poc-root "..\Research\PoC-Android
 
 Normalization uses training cameras only. CV poses use `T_cv = T_arkit @ diag(1,-1,-1,1)`. Depth in positive camera-Z metres receives the same scale as points/translations. Reverse `scene.json` origin/scale to put splats in metric capture coordinates; use `geometry/alignment.json` for processed-room correction.
 
-The wrapper reuses held-out RGB metrics/splat export and records source fingerprints in `iphone-intake.json`. The PoC's existing metric note about an interleaved path is superseded by that record: this adapter uses a separate check pass with shared mapping. Process completion alone does not prove room completeness or commercial readiness.
+The wrapper records the exact fitting/evaluation protocol and source fingerprints in `iphone-intake.json`, superseding the PoC's generic interleaved-metric note. Preserved evaluation uses the original check pass; automatic evaluation uses nearby held-out views with shared mapping; all-frame fitting disables held-out metrics. Process completion alone does not prove room completeness or commercial readiness.
 
 ## Interface and development
 
@@ -107,7 +121,7 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 
 Use the intake environment for Python. Native XCTest/device compilation run on Codemagic. See [VALIDATION.md](VALIDATION.md) for actual results versus pending checks.
 
-The first completed 0.2.1 device package passes intake and interchange checks, but its training pass misses much of the room. Full pipeline integration remains pending a complete training route and actual reconstruction: [22 October scan review](docs/SCAN-REVIEW-2026-10-22.md).
+The original 0.2.1 benchmark split restricted training to 22/85 frames. The new all-frame mode uses all 85 without modifying the source or claiming held-out scores. See [the guided-capture implementation and reconstruction trial](docs/GUIDED-CAPTURE.md).
 
 Commercial use is a design constraint: public Apple frameworks, Flutter notices, no bundled reconstruction model, recording disclosure, deletion and no hidden collection. [COMMERCIAL-USE.md](docs/COMMERCIAL-USE.md) records controls and remaining release decisions. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) separates app dependencies from optional research tooling.
 

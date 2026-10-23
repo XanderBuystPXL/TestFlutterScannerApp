@@ -23,6 +23,27 @@ class ScanSummary {
   final Map<String, int> counts;
   final bool pipelineReady;
   final Map<String, dynamic> capture;
+
+  bool get isContinuous => capture['capture_mode'] == 'continuous_guided';
+
+  bool get needsMoreViews =>
+      isContinuous && (capture['guidance'] as Map?)?['coverage_passed'] != true;
+
+  String get captureDescription {
+    if (!pipelineReady) {
+      return 'Older geometry-only scan. Record a new scan to capture photos and depth for reconstruction.';
+    }
+    if (isContinuous) {
+      final coverage = needsMoreViews
+          ? 'Coverage warning: more views are recommended.'
+          : 'Detected walls and floor have overlapping views.';
+      final warning =
+          capture['image_quality_warning_at_finish'] as String? ?? '';
+      final quality = warning.isEmpty ? '' : ' Capture warning: $warning';
+      return '${capture['capture_frames']} usable views saved. $coverage$quality Reconstruction quality still needs verification.';
+    }
+    return 'Capture ZIP: ${capture['train_frames']} training frames, ${capture['validation_frames']} check frames. Reconstruction quality still needs verification.';
+  }
 }
 
 class RoomPlanStatus {

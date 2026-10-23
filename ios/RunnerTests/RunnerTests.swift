@@ -1,4 +1,5 @@
 import XCTest
+import simd
 @testable import Runner
 
 final class RunnerTests: XCTestCase {
@@ -183,6 +184,129 @@ final class RunnerTests: XCTestCase {
       var changed = valid; changed[field] = 0
       XCTAssertThrowsError(try CaptureFormat.validateCaptureReport(changed))
     }
+  }
+
+  func testMotionGateSkipsFastMotionAndResetsAfterTrackingLoss() {
+    func yaw(_ degrees: Float) -> simd_float4x4 {
+      simd_float4x4(simd_quatf(angle: degrees * .pi / 180, axis: SIMD3(0, 1, 0)))
+    }
+    XCTAssertEqual(CaptureMotionGate.rotationDegrees(from: yaw(0), to: yaw(90)), 90, accuracy: 0.01)
+    var gate = CaptureMotionGate()
+    XCTAssertTrue(gate.isSteady(time: 0, pose: yaw(0)))
+    XCTAssertFalse(gate.isSteady(time: 0.05, pose: yaw(10)))
+    XCTAssertTrue(gate.isSteady(time: 0.10, pose: yaw(11)))
+    var moved = yaw(11); moved.columns.3.x = 0.10
+    XCTAssertFalse(gate.isSteady(time: 0.15, pose: moved))
+    gate.reset()
+    XCTAssertTrue(gate.isSteady(time: 0.20, pose: yaw(90)))
+  }
+
+  func testAppleBinaryNodeMetadataBecomesJSONBeforeChecksums() throws {
+    let id = try begin(), report = try captureFixture(id), root = try store.directory(id)
+    let mapping = ["Wall0": UUID().uuidString, "Door0": UUID().uuidString]
+    let plist = try PropertyListSerialization.data(fromPropertyList: mapping, format: .binary, options: 0)
+    let url = root.appendingPathComponent("roomplan/node-map.json")
+    try plist.write(to: url)
+    _ = try CaptureFormat.finalise(root: root, scanID: id, device: [:], counts: counts, report: report)
+    XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: String], mapping)
+    let files = try CaptureFormat.readJSON(root.appendingPathComponent("checksums.json"))["files"] as! [String: Any]
+    XCTAssertEqual((files["roomplan/node-map.json"] as? [String: Any])?["sha256"] as? String,
+                   try CaptureFormat.fingerprint(url)["sha256"] as? String)
+  }
+
+  func testNodeMetadataRejectsNonStringValuesAndArrays() throws {
+    let plist = try PropertyListSerialization.data(fromPropertyList: ["Wall0": 3], format: .xml, options: 0)
+    XCTAssertThrowsError(try CaptureFormat.normalisedNodeMap(plist))
+    XCTAssertThrowsError(try CaptureFormat.normalisedNodeMap(Data("[1,2]".utf8)))
+  }
+
+  private func guidanceSurfaces() -> [GuidanceSurface] {
+    // Synthetic planes exercise projection/coverage only; not room/device evidence.
+    (0..<4).map { i in
+      var transform = matrix_identity_double4x4
+      transform.columns.3 = SIMD4(Double(i % 3 - 1) * 0.35, 0, -2, 1)
+      return GuidanceSurface(id: "surface-\(i)", kind: i == 3 ? "floor" : "wall",
+        label: i == 3 ? "Floor 1" : "Wall \(i+1)", transform: transform, size: SIMD3(1, 1, 0))
+    }
+  }
+
+  private func guidanceFrame(_ index: Int, x: Double, depth: Float = 2, confidence: UInt8 = 2) -> GuidanceFrame {
+    var camera = matrix_identity_double4x4; camera.columns.3.x = x
+    return GuidanceFrame(timestamp: Double(index)/3, camera: camera, width: 64, height: 48,
+      fx: 32, fy: 32, cx: 32, cy: 24, depth: [Float](repeating: depth, count: 64*48),
+      confidence: [UInt8](repeating: confidence, count: 64*48), brightness: 100, detail: 50)
+  }
+
+  func testGuidanceRequiresTranslationRatherThanStationaryFrameCount() {
+    let guidance = CaptureGuidance(); guidance.setSurfaces(guidanceSurfaces())
+    for i in 0..<60 { guidance.add(guidanceFrame(i, x: 0)) }
+    XCTAssertFalse(guidance.snapshot().ready)
+    XCTAssertTrue(guidance.snapshot().fractions.values.allSatisfy { $0 == 0 })
+  }
+
+  func testGuidanceCreditsOverlappingViewsAndReplaysNewGeometry() {
+    let guidance = CaptureGuidance()
+    for i in 0..<30 { guidance.add(guidanceFrame(i, x: Double(i)/29*0.6)) }
+    // Geometry arriving later must use already saved views too.
+    guidance.setSurfaces(guidanceSurfaces())
+    XCTAssertTrue(guidance.snapshot().ready)
+    XCTAssertEqual(guidance.snapshot().report["saved_frames"] as? Int, 30)
+    XCTAssertFalse(guidance.snapshot().report["reconstruction_verified"] as! Bool)
+    XCTAssertFalse(guidance.snapshot(coaching: "Slow down").ready)
+    XCTAssertFalse(guidance.snapshot(tracking: "Tracking limited").ready)
+  }
+
+  func testGuidanceRejectsLowConfidenceAndOccludedWallSamples() {
+    let cases: [(Float, UInt8)] = [(1, 2), (2, 0)]
+    for (depth, confidence) in cases {
+      let guidance = CaptureGuidance(); guidance.setSurfaces(guidanceSurfaces())
+      for i in 0..<30 { guidance.add(guidanceFrame(i, x: Double(i)/29*0.6, depth: depth, confidence: confidence)) }
+      XCTAssertFalse(guidance.snapshot().ready)
+      XCTAssertTrue(guidance.snapshot().fractions.values.allSatisfy { $0 == 0 })
+    }
+  }
+
+  func testGuidanceNewUnseenWallAndMissingFloorPreventReady() {
+    let guidance = CaptureGuidance(); guidance.setSurfaces(guidanceSurfaces())
+    for i in 0..<30 { guidance.add(guidanceFrame(i, x: Double(i)/29*0.6)) }
+    XCTAssertTrue(guidance.snapshot().ready)
+    guidance.setSurfaces(Array(guidanceSurfaces().prefix(3)))
+    XCTAssertFalse(guidance.snapshot().ready)
+    XCTAssertTrue(guidance.snapshot().message.contains("floor"))
+    var transform = matrix_identity_double4x4; transform.columns.3 = SIMD4(100, 0, -2, 1)
+    guidance.setSurfaces(guidanceSurfaces() + [GuidanceSurface(id: "unseen", kind: "wall", label: "Wall 4", transform: transform, size: SIMD3(1,1,0))])
+    XCTAssertFalse(guidance.snapshot().ready)
+    XCTAssertEqual(guidance.snapshot().missingID, "unseen")
+  }
+
+  func testContinuousPackageNeedsAssessmentButNoUserSelectedCheckPass() {
+    let guidance = CaptureGuidance(); guidance.setSurfaces(guidanceSurfaces())
+    for i in 0..<30 { guidance.add(guidanceFrame(i, x: Double(i)/29*0.6)) }
+    var report: [String: Any] = ["capture_mode": "continuous_guided", "train_frames": 30,
+      "capture_frames": 30, "validation_frames": 0, "saved_frames": 30,
+      "training_camera_span_metres": 0.6, "guidance": guidance.snapshot().report]
+    XCTAssertNoThrow(try CaptureFormat.validateCaptureReport(report))
+    report.removeValue(forKey: "guidance")
+    XCTAssertThrowsError(try CaptureFormat.validateCaptureReport(report))
+    XCTAssertNoThrow(try CaptureFormat.validateCaptureReport(report, requireGuidance: false))
+  }
+
+  func testContinuousWarningPackagePreservesFilesWithoutClaimingCoveragePass() throws {
+    let id = try begin(), root = try store.directory(id)
+    var report = try captureFixture(id, train: 30, validation: 0)
+    let indexURL = root.appendingPathComponent("frames.jsonl")
+    let original = try String(contentsOf: indexURL, encoding: .utf8)
+    try original.replacingOccurrences(of: "\"train\"", with: "\"capture\"").write(to: indexURL, atomically: true, encoding: .utf8)
+    let guidance = CaptureGuidance()
+    for i in 0..<30 { guidance.add(guidanceFrame(i, x: Double(i)/29*0.6)) }
+    report["capture_mode"] = "continuous_guided"; report["capture_frames"] = 30
+    report["training_camera_span_metres"] = 0.6; report["guidance"] = guidance.snapshot().report
+    _ = try CaptureFormat.finalise(root: root, scanID: id, device: ["testFixture": true], counts: counts, report: report)
+    let manifest = try CaptureFormat.readJSON(root.appendingPathComponent("manifest.json"))
+    XCTAssertEqual(manifest["schema_version"] as? Int, 2)
+    XCTAssertEqual(manifest["quality_status"] as? String, "needs_more_views_reconstruction_unverified")
+    XCTAssertEqual(try store.latestCompleted()?["scanId"] as? String, id)
+    XCTAssertEqual(try store.resultURLs().count, 1)
   }
 
   func testDeletionRemovesFailedAndCompletedCapturesAndPreservesUnrelatedFiles() throws {

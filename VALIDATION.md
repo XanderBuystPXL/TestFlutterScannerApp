@@ -1,8 +1,20 @@
 # Verification record
 
-Source **0.2.1 (4)**, checked on Windows, 22 October 2026. Flutter 3.35.4 / Dart 3.9.2; Python 3.12.14, NumPy 2.3.5, Pillow 12.3.0. Independent COLMAP reader: pycolmap 4.2.1, installed only in ignored local tools.
+Current source **0.3.0 (5)**, checked on Windows, 23 October 2026. Earlier 0.2.1 results below are retained as history. Flutter 3.35.4 / Dart 3.9.2; Python 3.12.14, NumPy 2.3.5, Pillow 12.3.0. Independent COLMAP reader: pycolmap 4.2.1, installed only in ignored local tools.
 
-## Passed locally for the new source
+## Current 0.3.0 verification
+
+- Flutter analysis and formatting clean; **18 widget/service tests pass**, including restart/share of continuous captures with warnings and explicit unverified-reconstruction wording.
+- **53 Python tests pass**, including schema-2 captures/warnings, legacy compatibility, explicit all-frame trials without source mutation, automatic holdout/seed isolation, rejection of isolated held-out views, and null rather than fabricated all-fit scores.
+- **37 native XCTest cases are defined**, nine additions for motion filtering, JSON metadata/checksums and stationary/translated viewpoints, late/new/unseen geometry, floor detection, depth confidence/occlusion, active coaching/tracking, continuous report requirements and shareable warning-package storage. They require Codemagic; no local Xcode is available. All eight Swift files pass the local syntax parser; this is not type-checking.
+- Versioned continuous captures, bounded subsampled depth guidance and source registration were checked locally. Codemagic config/stage/package scripts and property-list/source registrations are checked; new IPA/device execution remain pending.
+- The original real 0.2.1 ZIP remains unchanged. A new private **85-frame** fit completes 3,000 actual CUDA training steps and exports **889,641 Gaussians**. Independent PLY read finds all 59 fields finite. Fitted and 15cm-shifted-camera renders were inspected; furniture/detail artifacts remain. No held-out scores are claimed.
+- Offline sensor/geometry replay suggests the full ordinary walkthrough clears the initial observed-wall/floor coverage rule, while its original 22-frame training subset fails. This does not run or validate the live Swift guidance on an iPhone.
+- The Windows reconstruction helper resolves the moved read-only research runtime and passes actual-dataset preflight without editing it. Raw/derived room data and previews remain ignored. `3DViewerAproxx` is unchanged.
+
+[Guided capture implementation, reproduction and trial limits](docs/GUIDED-CAPTURE.md). **Next gate: Codemagic compilation/tests and real-device acceptance of 0.3.0, followed by target-viewer/full-room quality review.** Earlier requests for an end-user separate training/check walk are superseded by continuous capture; separate evaluation remains a development operation.
+
+## Historical 0.2.1 local verification
 
 - Dart formatting and Flutter analysis: clean.
 - **15 Flutter tests:** recording authorisation, support checks, permission denial, completion, cancellation preserving an earlier result, native errors, restart summary/role counts, sharing, deletion confirmation, missing bridge and malformed results. New tests cover retry without starting the camera/recording consent and an actionable retry failure that preserves the saved attempt.
@@ -50,7 +62,7 @@ The capture contains **22 training / 63 check frames**. The training route lasts
 
 See [the detailed scan review](docs/SCAN-REVIEW-2026-10-22.md) for package identity, methods, results and limits. Raw files, converted datasets and private inspection artifacts remain excluded from Git.
 
-## Still required before integration
+## Historical open items from the first 0.2.1 review
 
 1. Retain corrected Codemagic logs for 28 native tests, ZIP verification and device build. The supplied completed 0.2.1 package proves device capture/export execution, not that the entire CI workflow or all tests passed.
 2. Record a complete, overlapping **training** route around the whole room, then a separate shorter check route. The current package passes file validation but fails sufficient training coverage; do not relabel check frames as training to manufacture acceptance. Retry recovery of the older failed capture remains unverified.

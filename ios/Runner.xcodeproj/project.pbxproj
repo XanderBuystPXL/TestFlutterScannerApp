@@ -10,6 +10,7 @@
 		A9C012000000000000000006 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000016 /* PrivacyInfo.xcprivacy */; };
 		A9C012000000000000000004 /* CapturePackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000014 /* CapturePackage.swift */; };
 		A9C012000000000000000005 /* CaptureFrameWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000015 /* CaptureFrameWriter.swift */; };
+		A9C012000000000000000006 /* CaptureGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000016 /* CaptureGuidance.swift */; };
 		A9C012000000000000000001 /* ScanStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000011 /* ScanStore.swift */; };
 		A9C012000000000000000002 /* RoomPlanBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000012 /* RoomPlanBridge.swift */; };
 		A9C012000000000000000003 /* RoomScannerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C012000000000000000013 /* RoomScannerViewController.swift */; };
@@ -49,6 +50,7 @@
 		A9C012000000000000000016 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A9C012000000000000000014 /* CapturePackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePackage.swift; sourceTree = "<group>"; };
 		A9C012000000000000000015 /* CaptureFrameWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFrameWriter.swift; sourceTree = "<group>"; };
+		A9C012000000000000000016 /* CaptureGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureGuidance.swift; sourceTree = "<group>"; };
 		A9C012000000000000000011 /* ScanStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanStore.swift; sourceTree = "<group>"; };
 		A9C012000000000000000012 /* RoomPlanBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanBridge.swift; sourceTree = "<group>"; };
 		A9C012000000000000000013 /* RoomScannerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomScannerViewController.swift; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 				A9C012000000000000000013 /* RoomScannerViewController.swift */,
 				A9C012000000000000000014 /* CapturePackage.swift */,
 				A9C012000000000000000015 /* CaptureFrameWriter.swift */,
+				A9C012000000000000000016 /* CaptureGuidance.swift */,
 				A9C012000000000000000016 /* PrivacyInfo.xcprivacy */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
@@ -293,6 +296,7 @@
 				A9C012000000000000000003 /* RoomScannerViewController.swift in Sources */,
 				A9C012000000000000000004 /* CapturePackage.swift in Sources */,
 				A9C012000000000000000005 /* CaptureFrameWriter.swift in Sources */,
+				A9C012000000000000000006 /* CaptureGuidance.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -150,6 +150,80 @@ void main() {
     expect(calls, contains('shareLatestResult'));
   });
 
+  testWidgets(
+    'continuous scan restores coverage warning without test controls',
+    (tester) async {
+      status['latestScan'] = {
+        ...summary(),
+        'pipelineReady': true,
+        'capture': {
+          'capture_mode': 'continuous_guided',
+          'capture_frames': 85,
+          'guidance': {'coverage_passed': false},
+        },
+      };
+      await open(tester);
+      expect(find.textContaining('85 usable views saved.'), findsOneWidget);
+      expect(
+        find.textContaining('Coverage warning: more views'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('record a check pass'), findsNothing);
+      await tester.tap(find.text('Share scan files'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('shareLatestResult'));
+    },
+  );
+
+  testWidgets(
+    'continuous coverage pass still describes reconstruction as unverified',
+    (tester) async {
+      status['latestScan'] = {
+        ...summary(),
+        'pipelineReady': true,
+        'capture': {
+          'capture_mode': 'continuous_guided',
+          'capture_frames': 100,
+          'guidance': {'coverage_passed': true},
+        },
+      };
+      await open(tester);
+      expect(
+        find.textContaining('Detected walls and floor have overlapping views.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Reconstruction quality still needs verification.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Coverage warning:'), findsNothing);
+    },
+  );
+
+  testWidgets('capture condition warning survives a passing surface estimate', (
+    tester,
+  ) async {
+    status['latestScan'] = {
+      ...summary(),
+      'pipelineReady': true,
+      'capture': {
+        'capture_mode': 'continuous_guided',
+        'capture_frames': 100,
+        'guidance': {'coverage_passed': true},
+        'image_quality_warning_at_finish': 'Increase the room lighting.',
+      },
+    };
+    await open(tester);
+    expect(
+      find.textContaining('Capture warning: Increase the room lighting.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Reconstruction quality still needs verification.'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('local deletion requires confirmation and clears restored scan', (
     tester,
   ) async {

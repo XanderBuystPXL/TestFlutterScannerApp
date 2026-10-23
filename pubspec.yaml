@@ -1,7 +1,7 @@
 name: roomplan_device_test
 description: Standalone RoomPlan RGB, LiDAR and geometry capture for reconstruction testing.
 publish_to: none
-version: 0.2.1+4
+version: 0.3.0+5
 
 environment:
   sdk: ^3.9.2

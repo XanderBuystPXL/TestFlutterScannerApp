@@ -1,6 +1,6 @@
-# Capture format 1
+# Capture formats 1 and 2
 
-`manifest.format = aproxx.iphone-scan`, `schema_version = 1`. One UUID/coordinate space per attempt. New attempts never reuse or silently merge old frames.
+`manifest.format = aproxx.iphone-scan`, `schema_version = 2` for guided continuous capture; version 1 remains readable for older separate-pass captures. One UUID/coordinate space per attempt. New attempts never reuse or silently merge old frames.
 
 ```text
 Documents/RoomPlanTest/<UUID>/
@@ -23,7 +23,7 @@ The ZIP contains every payload except itself. `checksums.json` maps every other 
 
 ## Frames
 
-Each JSONL row holds frame/room/coordinate/segment IDs, `role` (`train` or `validation`), relative timestamp, image path/size, 3×3 intrinsics, 4×4 `camera_to_world`, tracking state, image transform, depth and confidence descriptors.
+Each JSONL row holds frame/room/coordinate/segment IDs, `role` (`capture` in version 2; `train` or `validation` in version 1), relative timestamp, image path/size, 3×3 intrinsics, 4×4 `camera_to_world`, tracking state, image transform, depth and confidence descriptors.
 
 RGB/calibration/pose/depth/confidence come from the **same ARFrame**. The shared ARSession is polled at 20Hz; at most three samples/second are admitted. A two-slot serial background writer bounds retained pixel buffers. ARFrame objects are not retained on the writer queue. Backpressure, limited tracking and missing depth are counted. Frame numbers can have gaps. Previous-frame depth is never substituted.
 
@@ -53,7 +53,7 @@ Apple's complete encoded room remains unchanged. Its SIMD transforms can be flat
 
 Completion requires processed walls, JSON validation/exact byte read-back, drained writer, ≥20 train/≥10 check frames and ≥0.2m train camera span. These are sanity minima, not coverage proof. USDZ/node-map export, checksums and ZIP must succeed before success returns. A missing ZIP after a packaging crash is recovered as interrupted. Partial attempts do not replace successful scans.
 
-The explicit check-pass RGB/depth never enters fitting/initialization through this adapter; normalization uses training cameras only. ARKit/RoomPlan still map the whole capture, including the check route. Label evaluation as held-out appearance/depth with shared mapping, not independent localization.
+For preserved or automatic evaluation splits, withheld RGB/depth never enters fitting/initialization; normalization uses fitting cameras only. ARKit/RoomPlan still map the whole capture, including withheld views. Label evaluation as held-out appearance/depth with shared mapping, not independent localization. An explicitly selected all-frame production trial uses all frames for fitting and disables held-out metrics while retaining original source roles.
 
 Diagnostics contain build/device versions, support/permission, state, UTC events, errors, result counts and drop counts. Application code records no account credentials, GPS, device name, serial or advertising identifier. Hardware identifier describes a model class. Interior geometry and images remain sensitive.
 
@@ -64,3 +64,18 @@ Hashes prove byte integrity, not sender identity or physical accuracy. Dataset c
 Payload paths are derived from resolved URL components, with containment checks and child-symlink rejection. File URLs returned by enumeration are retained for checksums/read-back rather than reconstructed from string offsets. This handles different spellings of a sandbox root and trailing directory separators. Frame index references and RGB/depth/confidence sizes are checked before completion metadata is generated. Errors identify the stage and relative asset path without requiring a full sandbox path in diagnostics.
 
 `retryLatestExport` reuses the latest failed/interrupted attempt if its capture report and room exports remain present. It validates every recorded frame before rebuilding the ZIP. Original capture IDs/device/build stay intact; the retry event records the current packager build. A failed attempt has no completion timestamp; old errors are cleared only when a retry starts, and a failed retry records a new error. Retry never fills in missing depth or silently omits frames.
+
+
+## Guided coverage assessment (version 2)
+
+`capture.capture_mode = continuous_guided`. `capture.guidance` stores algorithm `observed_surface_depth_agreement_v1`, saved count/span, per-surface fractions/thresholds, low-detail count and `reconstruction_verified = false`. Warnings and the user's save-warning acknowledgement survive restart, export and desktop conversion.
+
+Each detected wall/floor has 24 interior sample positions. A sample earns multi-view credit only when accepted saved depth/confidence agrees with its projected location from two camera positions at least 20cm apart. The bounded history uses every eighth depth pixel (not retained ARFrames) and is replayed as live geometry changes. Depth tolerance is max(15cm, 4% of camera-Z), range 0.15-8m, confidence at least medium. This is a sparse engineering estimate, not a measured surface-area percentage.
+
+Initial readiness thresholds: 30 frames, 0.5m camera span, at least three detected walls and one floor, at least 40% multi-view samples per wall and 20% per floor. All thresholds need tuning on representative real rooms. Occlusion and reflective/glass surfaces can under-report coverage; undetected surfaces, furniture appearance and full-room topology are outside the estimate. Do not equate a successful parametric RoomPlan model with complete visual coverage.
+
+Very dark camera images (mean luma below 10/255) are skipped and counted. Low light/detail and Apple coaching instructions produce live prompts. Luminance/Laplacian statistics are recorded for saved frames; low detail alone cannot distinguish blur from a plain wall and is not treated as definitive blur detection.
+
+`quality_status` is `estimated_surface_coverage_passed_reconstruction_unverified` or `needs_more_views_reconstruction_unverified`. Saving with a warning keeps a valid, shareable package without certifying quality. A final image/coaching/tracking warning is also retained separately. A geometry/camera failure still fails clearly. New captures use protocol `continuous_capture_no_user_selected_holdout`; fitting/evaluation selection is an explicit desktop operation, never an end-user scan stage.
+
+Motion selection additionally pauses saved photos above 60 degrees/second or 1 metre/second (pose-based heuristics adapted from the supplied 0.2.2 patch). Tracking loss resets the motion baseline. Skips/limits are recorded and the shared RoomPlan session continues; no additional user recording stage is introduced. New exports and retained-capture retries normalize Apple node property lists to genuine JSON before checksums. Earlier ZIPs remain readable as recorded.

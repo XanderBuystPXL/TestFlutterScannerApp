@@ -79,7 +79,7 @@ class _ScanTestPageState extends State<ScanTestPage>
         _message = status.latestScan != null
             ? 'Your latest completed scan is saved on this iPhone.'
             : status.supported
-            ? 'Ready. Capture the room, record a check pass, then Finish.'
+            ? 'Ready. Scan the room, follow the coverage guidance, then Finish.'
             : status.supportMessage;
         _error = null;
         _busy = false;
@@ -223,7 +223,7 @@ class _ScanTestPageState extends State<ScanTestPage>
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Walk slowly around the room with overlapping views of walls, floor and furniture. Then record a separate check pass. Avoid people, screens and private documents.',
+                    'Walk slowly around the room with overlapping views of walls, floor and furniture. Follow the coverage map and prompts, then Finish. Avoid people, screens and private documents.',
                   ),
                   const SizedBox(height: 24),
                   if (_busy) const LinearProgressIndicator(),
@@ -321,11 +321,7 @@ class _ScanTestPageState extends State<ScanTestPage>
                     Text('Saved ${scan.completedAt.toLocal()}'),
                     SelectableText('Scan ID: ${scan.scanId}'),
                     const SizedBox(height: 8),
-                    Text(
-                      scan.pipelineReady
-                          ? 'Capture ZIP: ${scan.capture['train_frames']} training frames, ${scan.capture['validation_frames']} check frames. Reconstruction quality still needs verification.'
-                          : 'Older geometry-only scan. Record a new scan to capture photos and depth for reconstruction.',
-                    ),
+                    Text(scan.captureDescription),
                   ],
                   const SizedBox(height: 24),
                   const Text(

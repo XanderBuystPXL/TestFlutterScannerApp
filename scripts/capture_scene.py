@@ -14,7 +14,8 @@ def scene_arrays(root, factor=1):
     rows = config["frames"]
     train = [i for i, f in enumerate(rows) if f["role"] == "train"]
     val = [i for i, f in enumerate(rows) if f["role"] == "validation"]
-    require(len(train) >= 20 and len(val) >= 10 and len(train)+len(val) == len(rows), "Explicit training/check roles required.")
+    all_frames = config.get("dataset_mode") == "all-frames"
+    require(len(train) >= 20 and (len(val) == 0 if all_frames else len(val) >= 10) and len(train)+len(val) == len(rows), "Dataset roles differ from the declared fitting/evaluation mode.")
     normalization = config["normalization"]
     origin, scale = np.array(normalization["origin"]), normalization["scale"]
     worlds = np.array([f["camera_to_world_cv_metres"] for f in rows])
@@ -42,6 +43,7 @@ class CaptureScene:
         config, self.train, self.val, self.worlds, self.sizes, Ks, self.points, self.colors = scene_arrays(root, factor)
         self.names = [f["name"] for f in config["frames"]]
         self.normalization = config["normalization"]
+        self.validation_protocol = config["validation_protocol"]
         self.origin = np.array(self.normalization["origin"])
         self.radius = 1 / self.normalization["scale"]
         self.Ks = [torch.tensor(K, dtype=torch.float32) for K in Ks]
@@ -75,7 +77,7 @@ class CaptureScene:
         return {"normalization": self.normalization, "camera_position": world[:3, 3].tolist(),
                 "camera_target": (world[:3, 3]+world[:3, 2]).tolist(), "camera_up": [0, 1, 0],
                 "train_views": len(self.train), "validation_views": len(self.val),
-                "validation_protocol": "withheld_rgb_depth_shared_arkit_and_roomplan_mapping",
+                "validation_protocol": self.validation_protocol,
                 "splits": {"train": [self.names[i] for i in self.train], "validation": [self.names[i] for i in self.val]},
                 "views": [{"name": n, "camera_to_world": w.tolist(),
                            "vertical_fov_degrees": float(np.degrees(2*np.arctan(self.sizes[i][1]/(2*self.Ks[i][1, 1].item()))))}

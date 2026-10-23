@@ -3,7 +3,7 @@ import Foundation
 
 enum CaptureFormat {
   static let name = "aproxx.iphone-scan"
-  static let version = 1
+  static let version = 2
   static let minimumTrainFrames = 20
   static let minimumValidationFrames = 10
   static let minimumCameraSpanMetres = 0.20
@@ -97,6 +97,7 @@ enum CaptureFormat {
 
   static func validateFrameFiles(root: URL, report: [String: Any], files: [(String, URL)]) throws {
     let inventory = Dictionary(uniqueKeysWithValues: files)
+    let continuous = report["capture_mode"] as? String == "continuous_guided"
     let data = try Data(contentsOf: root.appendingPathComponent("frames.jsonl"))
     var assets = Set<String>()
     var train = 0, validation = 0
@@ -104,7 +105,7 @@ enum CaptureFormat {
       guard let frame = try JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
             let id = frame["frame_id"] as? String,
             id.range(of: "^frame-[0-9]{6}$", options: .regularExpression) != nil,
-            let role = frame["role"] as? String, ["train", "validation"].contains(role),
+            let role = frame["role"] as? String, ["train", "validation", "capture"].contains(role),
             let rgb = frame["rgb_path"] as? String,
             let depth = frame["depth"] as? [String: Any], let depthPath = depth["path"] as? String,
             let confidence = frame["confidence"] as? [String: Any], let confidencePath = confidence["path"] as? String,
@@ -130,7 +131,8 @@ enum CaptureFormat {
           }
         } catch { throw fileError(error, stage: "frame validation", path: path) }
       }
-      if role == "train" { train += 1 } else { validation += 1 }
+      guard (continuous ? role == "capture" : role != "capture") else { throw error("Frame role does not match capture mode.") }
+      if role != "validation" { train += 1 } else { validation += 1 }
     }
     guard let expectedTrain = report["train_frames"] as? Int,
           let expectedValidation = report["validation_frames"] as? Int,
@@ -140,7 +142,25 @@ enum CaptureFormat {
     }
   }
 
-  static func validateCaptureReport(_ report: [String: Any]) throws {
+  static func validateCaptureReport(_ report: [String: Any], requireGuidance: Bool = true) throws {
+    if report["capture_mode"] as? String == "continuous_guided" {
+      guard let total = report["capture_frames"] as? Int, total >= CaptureGuidance.minimumFrames,
+            report["train_frames"] as? Int == total, report["saved_frames"] as? Int == total,
+            report["validation_frames"] as? Int == 0,
+            let span = report["training_camera_span_metres"] as? Double, span.isFinite, span >= minimumCameraSpanMetres else {
+        throw error("Capture at least 30 usable views and move between positions before saving.")
+      }
+      if requireGuidance {
+        guard let guidance = report["guidance"] as? [String: Any],
+              guidance["algorithm"] as? String == "observed_surface_depth_agreement_v1",
+              guidance["coverage_passed"] is Bool, guidance["saved_frames"] as? Int == total,
+              let measured = guidance["camera_span_metres"] as? Double,
+              measured.isFinite, abs(measured - span) < 0.0001 else {
+          throw error("The saved coverage assessment is missing or does not match the recorded frames.")
+        }
+      }
+      return
+    }
     guard let train = report["train_frames"] as? Int, train >= minimumTrainFrames,
           let validation = report["validation_frames"] as? Int, validation >= minimumValidationFrames else {
       throw error("Capture at least \(minimumTrainFrames) training frames and \(minimumValidationFrames) check-pass frames before finishing.")
@@ -151,10 +171,29 @@ enum CaptureFormat {
     }
   }
 
+  /// Metadata normalization adapted from the supplied 0.2.2 patch; room.json stays unchanged.
+  static func normalisedNodeMap(_ data: Data) throws -> Data {
+    let object: Any
+    if let json = try? JSONSerialization.jsonObject(with: data) { object = json }
+    else {
+      do { object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) }
+      catch { throw self.error("RoomPlan node metadata is neither JSON nor a property list.") }
+    }
+    guard let mapping = object as? [String: Any], mapping.values.allSatisfy({ $0 is String }) else {
+      throw error("RoomPlan node metadata must map node names to identifier strings.")
+    }
+    return try JSONSerialization.data(withJSONObject: mapping, options: [.prettyPrinted, .sortedKeys])
+  }
+
   /// Called only after capture has drained and RoomPlan files have been written.
   static func finalise(root: URL, scanID: String, device: [String: Any],
                        counts: [String: Int], report: [String: Any]) throws -> URL {
     try validateCaptureReport(report)
+    let continuous = report["capture_mode"] as? String == "continuous_guided"
+    let surfaceCoveragePassed = (report["guidance"] as? [String: Any])?["coverage_passed"] as? Bool == true
+    let qualityStatus = continuous ?
+      (surfaceCoveragePassed ? "estimated_surface_coverage_passed_reconstruction_unverified" : "needs_more_views_reconstruction_unverified") :
+      "capture_sanity_passed_alignment_and_reconstruction_require_device_acceptance"
     let diagnosticsURL = root.appendingPathComponent("diagnostics.json")
     var diagnostics = try readJSON(diagnosticsURL)
     diagnostics["state"] = "packaging"
@@ -165,10 +204,15 @@ enum CaptureFormat {
     try writeJSON(diagnostics, to: diagnosticsURL)
     let originalRoom = try Data(contentsOf: root.appendingPathComponent("room.json"))
     try RoomJSONValidator.validate(originalRoom, expectedCounts: counts)
+    // Normalize before hashing, for new captures and retries of retained incomplete captures.
+    let nodeURL = root.appendingPathComponent("roomplan/node-map.json")
+    let originalNodes = try Data(contentsOf: nodeURL)
+    let jsonNodes = try normalisedNodeMap(originalNodes)
+    if originalNodes != jsonNodes { try jsonNodes.write(to: nodeURL, options: [.atomic, .completeFileProtection]) }
     try validateFrameFiles(root: root, report: report, files: payloadFiles(root))
 
     let manifest: [String: Any] = [
-      "format": name, "schema_version": version, "scan_id": scanID, "room_id": scanID,
+      "format": name, "schema_version": continuous ? version : 1, "scan_id": scanID, "room_id": scanID,
       "created_at": diagnostics["createdAt"] ?? ScanStore.timestamp(), "completed_at": ScanStore.timestamp(),
       "device": device, "capture": report,
       "coordinate_system": ["coordinate_space_id": scanID, "units": "metres", "world": "arkit_right_handed_y_up",
@@ -179,10 +223,10 @@ enum CaptureFormat {
       "files": ["frames": "frames.jsonl", "events": "events.jsonl", "room": "room.json",
         "usdz": "roomplan/room.usdz", "node_map": "roomplan/node-map.json", "live_room": "roomplan/live-room.json", "checksums": "checksums.json"],
       "roomplan_alignment": "compare_live_and_processed_geometry_then_verify_against_sensor_cloud_no_assumed_identity",
-      "validation_protocol": "withheld_rgb_depth_shared_arkit_and_roomplan_mapping",
+      "validation_protocol": continuous ? "continuous_capture_no_user_selected_holdout" : "withheld_rgb_depth_shared_arkit_and_roomplan_mapping",
       "privacy": ["contains_raw_interior_photos": true, "automatically_redacted": false,
                   "automatic_upload": false, "excluded_from_device_backup": true],
-      "quality_status": "capture_sanity_passed_alignment_and_reconstruction_require_device_acceptance"
+      "quality_status": qualityStatus
     ]
     try writeJSON(manifest, to: root.appendingPathComponent("manifest.json"))
     // Diagnostics inside the ZIP describe the data commit. Sharing is enabled only after ZIP succeeds.

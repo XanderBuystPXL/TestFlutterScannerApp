@@ -183,7 +183,10 @@ def validate(package):
         require(len(data) == item["bytes"] and hashlib.sha256(data).hexdigest() == item["sha256"],
                 f"Checksum mismatch: {name}")
     m = package.obj("manifest.json")
-    require(m.get("format") == "aproxx.iphone-scan" and m.get("schema_version") == 1, "Unsupported capture format.")
+    require(m.get("format") == "aproxx.iphone-scan" and m.get("schema_version") in {1, 2}, "Unsupported capture format.")
+    continuous = m["schema_version"] == 2
+    require(not continuous or (m["capture"].get("capture_mode") == "continuous_guided" and
+            m["validation_protocol"] == "continuous_capture_no_user_selected_holdout"), "Invalid continuous capture contract.")
     import uuid
     uuid.UUID(m["scan_id"])
     require(m["scan_id"] == m["room_id"], "Single-room capture ID differs.")
@@ -212,7 +215,7 @@ def validate(package):
     frames = package.lines(files["frames"])
     require(30 <= len(frames) <= 1800, "Expected 30..1800 synchronized capture frames.")
     seen, assets, last_time, validation_started = set(), set(), -math.inf, False
-    usable = {"train": 0, "validation": 0}
+    usable = {"capture": 0} if continuous else {"train": 0, "validation": 0}
     for f in frames:
         require(isinstance(f["frame_id"], str) and re.fullmatch(r"frame-\d{6}", f["frame_id"], re.ASCII), "Invalid frame ID.")
         require(f["frame_id"] not in seen, "Duplicate frame ID.")
@@ -251,15 +254,33 @@ def validate(package):
         require(np.isin(confidence, [0, 1, 2]).all(), "Invalid confidence label.")
         require(reliable_mask(depth, confidence).mean() >= .02, "Frame has too little usable LiDAR depth.")
         usable[f["role"]] += 1
-    require(usable["train"] >= 20 and usable["validation"] >= 10, "Need 20 training and 10 check frames.")
+    require(usable.get("capture", 0) >= 30 if continuous else usable["train"] >= 20 and usable["validation"] >= 10,
+            "Need 30 continuous frames, or 20 training and 10 check frames for a legacy evaluation capture.")
     report = m["capture"]
-    require(report["train_frames"] == usable["train"] and report["validation_frames"] == usable["validation"] and
+    require(report["train_frames"] == usable.get("capture", usable.get("train", 0)) and report["validation_frames"] == usable.get("validation", 0) and
             report["saved_frames"] == len(frames), "Frame counts differ from manifest.")
     require(report["first_timestamp_seconds"] == frames[0]["timestamp_seconds"] and
             report["last_timestamp_seconds"] == frames[-1]["timestamp_seconds"], "Capture time bounds differ.")
-    centers = np.array([f["camera_to_world"] for f in frames if f["role"] == "train"])[:, :3, 3]
+    centers = np.array([f["camera_to_world"] for f in frames if f["role"] in {"train", "capture"}])[:, :3, 3]
     span = float(np.linalg.norm(np.ptp(centers, axis=0)))
     require(span >= .20 and abs(span - report["training_camera_span_metres"]) < 1e-4, "Training camera movement differs/is too small.")
+    if continuous:
+        quality = report["guidance"]
+        require(report["capture_frames"] == len(frames) and quality["saved_frames"] == len(frames) and
+                abs(quality["camera_span_metres"] - span) < 1e-4 and
+                quality["algorithm"] == "observed_surface_depth_agreement_v1", "Coverage assessment differs from capture.")
+        surfaces = quality["surfaces"]
+        require(isinstance(quality["coverage_passed"], bool) and isinstance(surfaces, list), "Invalid coverage assessment.")
+        require(len({s["id"] for s in surfaces}) == len(surfaces), "Duplicate assessed surface ID.")
+        for s in surfaces:
+            require(s["kind"] in {"wall", "floor"} and s["threshold"] == (.4 if s["kind"] == "wall" else .2) and
+                    type(s["multi_view_fraction"]) in {int, float} and 0 <= s["multi_view_fraction"] <= 1,
+                    "Invalid surface coverage estimate.")
+        passed = (span >= .5 and sum(s["kind"] == "wall" for s in surfaces) >= 3 and
+                  any(s["kind"] == "floor" for s in surfaces) and all(s["multi_view_fraction"] >= s["threshold"] for s in surfaces))
+        require(quality["coverage_passed"] == passed, "Coverage pass flag differs from assessment.")
+        expected_status = "estimated_surface_coverage_passed_reconstruction_unverified" if passed else "needs_more_views_reconstruction_unverified"
+        require(m["quality_status"] == expected_status and quality["reconstruction_verified"] is False, "Misleading quality status.")
     require(assets | set(files.values()) | {"manifest.json", "diagnostics.json"} == set(package.entries), "Unexpected/unreferenced assets.")
     return m, frames
 
@@ -327,13 +348,36 @@ def colmap_model(root, frames, points, colors):
             stream.write(struct.pack("<QdddBBBdQ", index, *p, *c, 0., 0))
 
 
-def prepare(source, output):
+def fitting_frames(frames, mode):
+    require(mode in {"preserve-split", "all-frames", "automatic-holdout"}, "Unknown dataset mode.")
+    if mode == "preserve-split":
+        require(all(f["role"] in {"train", "validation"} for f in frames), "Continuous capture has no original evaluation split; use all-frames or automatic-holdout.")
+        return [dict(f, source_role=f["role"]) for f in frames]
+    heldout = set()
+    if mode == "automatic-holdout":
+        poses = np.asarray([f["camera_to_world"] for f in frames])
+        desired = max(10, len(frames)//5)
+        for index in np.linspace(1, len(frames)-2, desired).astype(int):
+            candidates = [j for j in [index-1, index+1] if j not in heldout]
+            if any(np.linalg.norm(poses[j,:3,3]-poses[index,:3,3]) <= .5 and
+                   np.dot(poses[j,:3,2], poses[index,:3,2]) >= math.cos(math.radians(20)) for j in candidates):
+                heldout.add(int(index))
+        require(len(heldout) >= 10 and len(frames)-len(heldout) >= 20,
+                "Insufficient nearby views for automatic evaluation. Capture more overlapping views or use all-frames without held-out metrics.")
+    return [dict(f, source_role=f["role"], role="validation" if i in heldout else "train") for i, f in enumerate(frames)]
+
+
+def prepare(source, output, mode=None):
     output = Path(output).resolve()
     require(not output.exists(), "Output already exists; use a new dataset folder.")
     output.parent.mkdir(parents=True, exist_ok=True)
     # Work in a sibling staging folder; a failed conversion cannot look complete.
     with Package(source) as package, tempfile.TemporaryDirectory(prefix=".capture-", dir=output.parent) as tmp:
         manifest, frames = validate(package)
+        mode = mode or ("all-frames" if manifest["schema_version"] == 2 else "preserve-split")
+        frames = fitting_frames(frames, mode)
+        protocol = {"all-frames": "all_frames_used_for_fitting_no_heldout_metrics",
+                    "automatic-holdout": "automatic_nearby_view_holdout_shared_mapping_not_independent"}.get(mode, manifest["validation_protocol"])
         root = Path(tmp) / "dataset"
         root.mkdir()
         for d in ["images", "sensor_depth", "holdout_depth", "geometry", "evidence"]:
@@ -362,7 +406,7 @@ def prepare(source, output):
             dK = np.asarray(f["depth"]["intrinsics"])
             ar_world = np.asarray(f["camera_to_world"])
             cv_world = ar_world @ BASIS
-            row = {"name": name, "role": f["role"], "K": K.tolist(), "size": f["rgb_size_px"],
+            row = {"name": name, "role": f["role"], "source_role": f["source_role"], "K": K.tolist(), "size": f["rgb_size_px"],
                    "camera_to_world_cv_metres": cv_world.tolist(), "timestamp_seconds": f["timestamp_seconds"]}
             rows.append(row)
             folder = "sensor_depth" if f["role"] == "train" else "holdout_depth"
@@ -399,7 +443,10 @@ def prepare(source, output):
         write_json(root / "pipeline.json", {"schema_version": 1, "source_scan_id": manifest["scan_id"],
                    "source_checksums_sha256": hashlib.sha256(package.read("checksums.json")).hexdigest(),
                    "normalization": normalization, "frames": rows, "initialization": "training_only_sensor_depth",
-                   "validation_protocol": manifest["validation_protocol"], "alignment_acceptance": "pending_real_device_review"})
+                   "dataset_mode": mode, "heldout_metrics_available": mode != "all-frames",
+                   "source_validation_protocol": manifest["validation_protocol"], "source_coverage": manifest["capture"].get("guidance"),
+                   "source_capture_warning": manifest["capture"].get("image_quality_warning_at_finish", ""),
+                   "validation_protocol": protocol, "alignment_acceptance": "pending_real_device_review"})
         train_names = ["images/" + r["name"] for r in rows if r["role"] == "train"]
         val_names = ["images/" + r["name"] for r in rows if r["role"] == "validation"]
         write_json(root / "transforms.json", {"camera_model": "OPENCV", "orientation_override": "none",
@@ -472,7 +519,9 @@ def review_images(package, frames, root):
     sheet.save(root / "contact-sheet.jpg", quality=90)
     # RGB/depth overlay is for physical edge-alignment review, never an automatic proof.
     for role in ["train", "validation"]:
-        f = next(f for f in frames if f["role"] == role)
+        f = next((f for f in frames if f["role"] == role), None)
+        if f is None:
+            continue
         depth, confidence = depth_arrays(package, f)
         valid = reliable_mask(depth, confidence)
         display = np.clip(np.nan_to_num(depth, nan=0., posinf=0.) / 8 * 255, 0, 255).astype(np.uint8)
@@ -491,6 +540,8 @@ def main():
     convert = sub.add_parser("prepare")
     convert.add_argument("capture")
     convert.add_argument("output")
+    convert.add_argument("--mode", choices=["preserve-split", "all-frames", "automatic-holdout"],
+                         help="Default: preserve legacy split; all frames for continuous captures. Original package stays unchanged.")
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -498,7 +549,7 @@ def main():
                 m, frames = validate(p)
             print(f"PASS: {m['scan_id']}, {len(frames)} synchronized frames. Physical alignment/reconstruction still require review.")
         else:
-            print(f"Prepared: {prepare(args.capture, args.output)}")
+            print(f"Prepared: {prepare(args.capture, args.output, args.mode)}")
     except (ValueError, KeyError, TypeError, OverflowError, OSError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Capture rejected: {error}\n")
 

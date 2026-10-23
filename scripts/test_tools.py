@@ -119,17 +119,17 @@ class IpaValidationTests(unittest.TestCase):
             verify(self.ipa)
 
     def test_capture_build_requires_privacy_and_licence_artifacts(self):
-        self.info.update(CFBundleShortVersionString="0.2.1", CFBundleVersion="4")
+        self.info.update(CFBundleShortVersionString="0.3.0", CFBundleVersion="5")
         self.save()
         with self.assertRaisesRegex(ValueError, "privacy manifest"):
             verify(self.ipa, capture_controls=True)
         self.save(controls=True)
-        self.assertEqual(verify(self.ipa, capture_controls=True)["CFBundleVersion"], "4")
+        self.assertEqual(verify(self.ipa, capture_controls=True)["CFBundleVersion"], "5")
 
     def test_old_build_cannot_be_mislabelled_as_full_capture(self):
         self.info.update(CFBundleShortVersionString="0.1.0", CFBundleVersion="1")
         self.save(controls=True)
-        with self.assertRaisesRegex(ValueError, "version 0.2.1"):
+        with self.assertRaisesRegex(ValueError, "version 0.3.0"):
             verify(self.ipa, capture_controls=True)
 
 

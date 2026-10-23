@@ -39,8 +39,8 @@ def verify(path, capture_controls=False):
             notices = [n for n in names if n.startswith(prefix) and n.endswith("/flutter_assets/NOTICES.Z")]
             if len(notices) != 1 or "copyright" not in gzip.decompress(archive.read(notices[0])).decode("utf-8").lower():
                 raise ValueError("Missing or unreadable bundled dependency licence notices.")
-            if (info.get("CFBundleShortVersionString"), str(info.get("CFBundleVersion"))) != ("0.2.1", "4"):
-                raise ValueError("Expected full-capture app version 0.2.1 (4).")
+            if (info.get("CFBundleShortVersionString"), str(info.get("CFBundleVersion"))) != ("0.3.0", "5"):
+                raise ValueError("Expected guided-capture app version 0.3.0 (5).")
         return info
 
 
